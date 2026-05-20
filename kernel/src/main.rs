@@ -14,7 +14,9 @@ use embassy_rp::{
     peripherals::{self, DMA_CH0},
     spi::{self, Spi},
 };
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
+};
 use embassy_time::Delay;
 use embedded_graphics::{
     Drawable,
@@ -59,6 +61,13 @@ static FLUSH_DISPLAY_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 // NOTE "static mut" is generally not a good idea. But may be required for this kernel?
 // display buffer that either stores text or pixel data, depending on current mode.
 static mut DISPLAY_FB: [u8; 128 * 64] = [0; 128 * 64];
+
+const MAX_KEYBOARD_EVENTS_BACKLOG: usize = 6;
+static KEYBOARD_EVENT_CHANNEL: Channel<
+    CriticalSectionRawMutex,
+    drivers::keyboard::KeyEvent,
+    MAX_KEYBOARD_EVENTS_BACKLOG,
+> = Channel::new();
 
 assign_resources! {
     display: DisplayResources {
@@ -219,7 +228,7 @@ async fn usb_entry(r: UsbResources) {
         }
 
         defmt::debug!("HID device ready, load keyboard driver");
-        let mut kbd = drivers::Keyboard::setup(&mut hid).await;
+        let mut kbd = drivers::Keyboard::setup(&mut hid, KEYBOARD_EVENT_CHANNEL.dyn_sender()).await;
         kbd.entry().await;
     }
 }

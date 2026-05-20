@@ -1,4 +1,5 @@
 use embassy_rp::usb::host::{Allocator, SealedHostInstance};
+use embassy_sync::channel::DynamicSender;
 use embassy_usb_host::{
     BusHandle,
     class::hid::{HidHost, KeyboardReport, PROTOCOL_BOOT},
@@ -27,22 +28,29 @@ fn report_to_keys(report: &KeyboardReport, keys: &mut [Option<Key>; 6]) {
 
 type KeyboardHidHost<'d, T> = HidHost<'d, BusHandle<'d, Allocator<'d, T>>>;
 
-pub struct Keyboard<'d, T: SealedHostInstance> {
+pub struct Keyboard<'d, 's, T: SealedHostInstance> {
     hid_host: &'d mut KeyboardHidHost<'d, T>,
+    event_sender: DynamicSender<'s, KeyEvent>,
 }
 
-impl<'d, T: SealedHostInstance> Keyboard<'d, T> {
-    pub async fn setup(hid_host: &'d mut KeyboardHidHost<'d, T>) -> Self {
+impl<'d, 's, T: SealedHostInstance> Keyboard<'d, 's, T> {
+    pub async fn setup(
+        hid_host: &'d mut KeyboardHidHost<'d, T>,
+        event_sender: DynamicSender<'s, KeyEvent>,
+    ) -> Self {
         hid_host
             .set_protocol(PROTOCOL_BOOT)
             .await
             .expect("failed to set keyboard to boot mode");
-        Self { hid_host }
+        Self {
+            hid_host,
+            event_sender,
+        }
     }
 
     async fn push_event(&self, event: KeyEvent) {
-        // TODO send events to an actual queue
         defmt::debug!("new key event {:?}", event);
+        self.event_sender.send(event).await;
     }
 
     pub async fn entry(&mut self) -> ! {
