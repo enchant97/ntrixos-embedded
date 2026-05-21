@@ -6,8 +6,8 @@ pub mod display;
 pub mod fd;
 pub mod process;
 
-pub use kernel_abi::KernelAbi; // remove when proc-macro is implemented for _start
 pub use process::ExitCode;
+pub use sdk::KernelAbi; // remove when proc-macro is implemented for _start
 
 /// Re-export used parts of nostd.
 pub mod nostd {

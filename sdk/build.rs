@@ -16,5 +16,5 @@ fn main() {
         .include_item("ExitCode")
         .generate()
         .expect("Unable to generate C bindings")
-        .write_to_file("../target/include/abi_bindings.h");
+        .write_to_file("../target/include/sdk.h");
 }

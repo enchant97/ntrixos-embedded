@@ -9,7 +9,7 @@ An experimental "from scratch" operating system project aimed at the RP2040/RP23
 
 ## Structure
 - `kernel` - The Kernel
-- `kernel_abi` - The public ABI exposed by the kernel
+- `sdk` - Shared types and definitions for kernel + apps to link to.
 - `libsys` - A friendly Rust interface for using the ABI
 - `shell` - User control via CLI
 - `apps/` - external apps

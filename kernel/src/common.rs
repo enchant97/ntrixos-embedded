@@ -1,5 +1,5 @@
 //! Commonly used misc functions and types
-use kernel_abi::{ExitCode, KernelAbi};
+use sdk::{ExitCode, KernelAbi};
 
 /// A runnable user app entry function.
 ///

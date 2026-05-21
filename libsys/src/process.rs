@@ -1,4 +1,4 @@
-pub use kernel_abi::ExitCode;
+pub use sdk::ExitCode;
 
 use crate::core::abi;
 

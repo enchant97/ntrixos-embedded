@@ -5,11 +5,11 @@ use core::{
     ptr::{null, null_mut},
 };
 use embassy_sync::blocking_mutex::{Mutex, raw::ThreadModeRawMutex};
-use kernel_abi::display::DisplayOperation;
-use kernel_abi::{ExitCode, FileDescriptor};
 use nostd::io::Write;
+use sdk::display::DisplayOperation;
+use sdk::{ExitCode, FileDescriptor};
 
-pub use kernel_abi::display::{DisplayMode, DisplayStat};
+pub use sdk::display::{DisplayMode, DisplayStat};
 
 pub struct DisplayRaw {
     _private: (),

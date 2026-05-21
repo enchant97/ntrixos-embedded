@@ -1,6 +1,6 @@
 use core::{ffi::c_void, slice::from_raw_parts_mut};
 
-use kernel_abi::{ExitCode, FileDescriptor};
+use sdk::{ExitCode, FileDescriptor};
 
 use crate::core::abi;
 

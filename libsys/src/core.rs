@@ -1,4 +1,4 @@
-use kernel_abi::KernelAbi;
+use sdk::KernelAbi;
 
 static mut ABI_PTR: *const KernelAbi = core::ptr::null();
 

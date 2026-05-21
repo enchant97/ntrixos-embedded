@@ -25,7 +25,7 @@ use embedded_graphics::{
     prelude::{Point, Size},
     text::{Alignment, Text, renderer::TextRenderer},
 };
-use kernel_abi::{ExitCode, FileDescriptor, KernelAbi};
+use sdk::{ExitCode, FileDescriptor, KernelAbi};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
