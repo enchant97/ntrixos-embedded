@@ -1,4 +1,4 @@
-pub use sdk::ExitCode;
+use sdk::ExitCode;
 
 use crate::core::abi;
 

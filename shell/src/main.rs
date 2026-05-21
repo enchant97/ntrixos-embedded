@@ -1,7 +1,10 @@
 #![no_std]
 #![no_main]
 
-use libsys::{ExitCode, nostd::io::Write};
+use libsys::{
+    nostd::io::Write,
+    sdk::{ExitCode, KernelAbi, drivers::display::DisplayMode},
+};
 
 // Symbols injected by the linker script
 unsafe extern "C" {
@@ -38,13 +41,13 @@ unsafe fn init_memory() {
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text._start")]
-pub extern "C" fn _start(abi: *const libsys::KernelAbi) -> ExitCode {
+pub extern "C" fn _start(abi: *const KernelAbi) -> ExitCode {
     unsafe {
         init_memory();
     }
     libsys::core::sys_init(abi);
     libsys::display::display().lock(|d| {
-        d.set_display_mode(libsys::display::DisplayMode::Text)
+        d.set_display_mode(DisplayMode::Text)
             .expect("failed to set mode");
         d.get_framebuffer_mut(|mut fb| {
             let msg = b"Hello World!";

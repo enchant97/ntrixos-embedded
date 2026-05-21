@@ -6,10 +6,8 @@ use core::{
 };
 use embassy_sync::blocking_mutex::{Mutex, raw::ThreadModeRawMutex};
 use nostd::io::Write;
-use sdk::display::DisplayOperation;
+use sdk::drivers::display::{DisplayMode, DisplayOperation, DisplayStat};
 use sdk::{ExitCode, FileDescriptor};
-
-pub use sdk::display::{DisplayMode, DisplayStat};
 
 pub struct DisplayRaw {
     _private: (),

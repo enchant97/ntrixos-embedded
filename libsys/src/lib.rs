@@ -6,8 +6,8 @@ pub mod display;
 pub mod fd;
 pub mod process;
 
-pub use process::ExitCode;
-pub use sdk::KernelAbi; // remove when proc-macro is implemented for _start
+/// Re-Export of SDK
+pub use sdk;
 
 /// Re-export used parts of nostd.
 pub mod nostd {
@@ -21,8 +21,9 @@ pub mod nostd {
 /// Will send relevant exit code to kernel.
 #[cfg(target_os = "none")]
 pub mod panic_system {
-    use crate::{ExitCode, process::exit};
+    use crate::process::exit;
     use core::panic::PanicInfo;
+    use sdk::ExitCode;
 
     #[panic_handler]
     fn panic(_: &PanicInfo) -> ! {
