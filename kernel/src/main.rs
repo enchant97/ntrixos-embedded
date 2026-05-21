@@ -3,7 +3,7 @@
 #![allow(static_mut_refs)]
 
 use assign_resources::assign_resources;
-use core::ptr::addr_of_mut;
+use core::ptr::{addr_of_mut, null_mut};
 use core::{ffi::c_void, str};
 use embassy_executor::Executor;
 use embassy_futures::join::join;
@@ -18,6 +18,8 @@ use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
 use embassy_time::Delay;
+use embedded_graphics::prelude::Primitive;
+use embedded_graphics::primitives::{PrimitiveStyle, Rectangle, StyledDrawable};
 use embedded_graphics::{
     Drawable,
     mono_font::{MonoTextStyle, ascii::FONT_4X6},
@@ -46,6 +48,7 @@ pub static KERNEL_ABI: KernelAbi = KernelAbi {
     malloc: abi_malloc,
     free: abi_free,
     write: abi_write,
+    read: abi_read,
     flush: abi_flush,
     seek: abi_seek,
     mmap: abi_mmap,
@@ -107,9 +110,37 @@ extern "C" fn abi_write(fd: FileDescriptor, buff: *const u8, buff_len: usize) {
     todo!()
 }
 
+extern "C" fn abi_read(fd: FileDescriptor, buff: *mut u8, buff_len: usize) -> isize {
+    match fd {
+        FileDescriptor::Display => -1,
+        FileDescriptor::KeyEvents => {
+            use sdk::drivers::keyboard::KeyEvent;
+            if buff_len < size_of::<KeyEvent>() {
+                // buffer too small
+                return -1;
+            }
+            // TODO this ignores a buffer with more than 1 event space
+            //      only ever returns 1 event
+            let event: KeyEvent;
+            loop {
+                if let Ok(v) = KEYBOARD_EVENT_CHANNEL.try_receive() {
+                    event = v;
+                    break;
+                }
+                cortex_m::asm::wfe();
+            }
+            unsafe {
+                (buff as *mut KeyEvent).write(event);
+            }
+            size_of::<KeyEvent>() as isize
+        }
+    }
+}
+
 extern "C" fn abi_flush(fd: FileDescriptor) {
     match fd {
         FileDescriptor::Display => FLUSH_DISPLAY_SIG.signal(()),
+        FileDescriptor::KeyEvents => {}
     }
 }
 
@@ -120,6 +151,7 @@ extern "C" fn abi_seek(fd: FileDescriptor, offset: usize) {
 extern "C" fn abi_mmap(fd: FileDescriptor) -> *mut c_void {
     match fd {
         FileDescriptor::Display => unsafe { DISPLAY_FB.as_mut_ptr() as *mut c_void },
+        FileDescriptor::KeyEvents => null_mut() as *mut c_void,
     }
 }
 
@@ -150,11 +182,18 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
 
     let font = FONT_4X6;
     let text_style = MonoTextStyle::new(&font, BinaryColor::On);
+    let background_style = PrimitiveStyle::with_fill(BinaryColor::Off);
 
     loop {
         defmt::debug!("waiting for next display flush");
         FLUSH_DISPLAY_SIG.wait().await;
-        // assumes always in text-mode
+        // XXX assumes always in text-mode
+        // draw zero over whole canvas
+        Rectangle::new(Point::zero(), Size::new(128, 64))
+            .into_styled(background_style)
+            .draw(&mut display)
+            .unwrap();
+        // draw line-by-line
         let mut point = Point::new(0, font.character_size.height as i32);
         let n_lines = 64 / font.character_size.height as usize;
         let line_length = 128 / font.character_size.width as usize;
@@ -164,14 +203,10 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
                 line = &DISPLAY_FB[line_i * line_length..(line_i + 1) * line_length];
             }
             defmt::debug!("{:?}", line);
-            Text::with_alignment(
-                str::from_utf8(line).unwrap().trim_end_matches("\0"),
-                point,
-                text_style,
-                Alignment::Left,
-            )
-            .draw(&mut display)
-            .unwrap();
+            let text_line = str::from_utf8(line).unwrap().trim_end_matches("\0");
+            Text::with_alignment(text_line, point, text_style, Alignment::Left)
+                .draw(&mut display)
+                .unwrap();
             point += Size::new(0, text_style.line_height());
         }
         display.flush(&mut delay).await;

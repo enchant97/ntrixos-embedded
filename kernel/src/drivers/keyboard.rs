@@ -50,6 +50,7 @@ impl<'d, 's, T: SealedHostInstance> Keyboard<'d, 's, T> {
     async fn push_event(&self, event: KeyEvent) {
         defmt::debug!("new key event {:?}", event);
         self.event_sender.send(event).await;
+        cortex_m::asm::sev();
     }
 
     pub async fn entry(&mut self) -> ! {

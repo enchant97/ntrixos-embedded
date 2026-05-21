@@ -3,7 +3,13 @@
 
 use libsys::{
     nostd::io::Write,
-    sdk::{ExitCode, KernelAbi, drivers::display::DisplayMode},
+    sdk::{
+        ExitCode, KernelAbi,
+        drivers::{
+            display::DisplayMode,
+            keyboard::{Action, KeyEvent, KeyKind},
+        },
+    },
 };
 
 // Symbols injected by the linker script
@@ -55,5 +61,24 @@ pub extern "C" fn _start(abi: *const KernelAbi) -> ExitCode {
         });
         d.flush().expect("fail to flush display buffer");
     });
+    loop {
+        let mut key_event: Option<KeyEvent> = None;
+        libsys::keyboard::keyboard().lock(|kb| {
+            key_event = Some(kb.read_key_blocking().unwrap());
+        });
+        if key_event.unwrap().action == Action::Press && key_event.unwrap().kind == KeyKind::Char {
+            libsys::display::display().lock(|d| {
+                d.get_framebuffer_mut(|mut fb| {
+                    let msg = format_args!("Key Pressed = {}", char::from(key_event.unwrap().code));
+                    let mut fb = &mut fb[64..128];
+                    fb.fill(0);
+                    fb.write_fmt(msg).unwrap();
+                });
+                d.flush().expect("fail to flush display buffer");
+            });
+        } else if key_event.unwrap().code == 0x29 {
+            break;
+        }
+    }
     ExitCode::Ok
 }

@@ -17,6 +17,7 @@ pub enum ExitCode {
 #[repr(C)]
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FileDescriptor {
+    KeyEvents,
     Display,
 }
 
@@ -30,6 +31,8 @@ pub struct KernelAbi {
     pub free: extern "C" fn(ptr: *mut u8),
     /// Write directly to the given file descriptor.
     pub write: extern "C" fn(fd: FileDescriptor, buff: *const u8, buff_len: usize),
+    /// Read directly from given file descriptor.
+    pub read: extern "C" fn(fd: FileDescriptor, buff: *mut u8, buff_len: usize) -> isize,
     /// Ensure everything that is buffered is written to given descriptor.
     pub flush: extern "C" fn(fd: FileDescriptor),
     /// Adjust current cursor of given file descriptor.

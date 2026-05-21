@@ -4,6 +4,7 @@ pub mod alloc;
 pub mod core;
 pub mod display;
 pub mod fd;
+pub mod keyboard;
 pub mod process;
 
 /// Re-Export of SDK
