@@ -5,13 +5,12 @@ use embassy_usb_host::{
     class::hid::{HidHost, KeyboardReport, PROTOCOL_BOOT},
 };
 
-mod core;
 mod layout;
 
-pub use crate::drivers::keyboard::core::{Action, Key, KeyEvent, Modifiers};
-use crate::drivers::keyboard::layout::usage_id_to_mapped_key;
+use crate::drivers::keyboard::layout::{MappedKey, usage_id_to_mapped_key};
+use sdk::drivers::keyboard::{Action, KeyEvent, Modifiers};
 
-fn report_to_keys(report: &KeyboardReport, keys: &mut [Option<Key>; 6]) {
+fn report_to_keys(report: &KeyboardReport, keys: &mut [Option<MappedKey>; 6]) {
     for (i, key) in report.keycodes.into_iter().enumerate() {
         if key <= 1 {
             keys[i] = None
@@ -54,8 +53,8 @@ impl<'d, 's, T: SealedHostInstance> Keyboard<'d, 's, T> {
     }
 
     pub async fn entry(&mut self) -> ! {
-        let mut current_keys: [Option<Key>; 6] = [None; 6];
-        let mut previous_keys: [Option<Key>; 6] = [None; 6];
+        let mut current_keys: [Option<MappedKey>; 6] = [None; 6];
+        let mut previous_keys: [Option<MappedKey>; 6] = [None; 6];
         loop {
             match self.hid_host.read_keyboard().await {
                 Ok(Some(report)) => {
@@ -76,7 +75,8 @@ impl<'d, 's, T: SealedHostInstance> Keyboard<'d, 's, T> {
                         }
                         if !exists {
                             self.push_event(KeyEvent {
-                                key: prev_key,
+                                kind: prev_key.into(),
+                                code: prev_key.into(),
                                 action: Action::Release,
                                 modifiers,
                             })
@@ -98,7 +98,8 @@ impl<'d, 's, T: SealedHostInstance> Keyboard<'d, 's, T> {
                         if !is_repeat {
                             // key is new
                             self.push_event(KeyEvent {
-                                key: current_key,
+                                kind: current_key.into(),
+                                code: current_key.into(),
                                 action: Action::Press,
                                 modifiers,
                             })

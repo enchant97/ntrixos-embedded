@@ -3,6 +3,7 @@
 use core::ffi::c_void;
 
 pub mod display;
+pub mod drivers;
 
 /// Used to report the exit code of the program.
 #[repr(C)]

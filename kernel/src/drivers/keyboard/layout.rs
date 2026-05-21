@@ -3,7 +3,31 @@
 //! - only supports Extended ASCII / CP437
 //! - used to convert between usage-id and expected character
 
-use crate::drivers::keyboard::core::{Key, Modifiers};
+use sdk::drivers::keyboard::{KeyKind, Modifiers};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MappedKey {
+    Raw(u8),
+    Char(u8),
+}
+
+impl From<MappedKey> for u8 {
+    fn from(value: MappedKey) -> Self {
+        match value {
+            MappedKey::Raw(v) => v,
+            MappedKey::Char(v) => v,
+        }
+    }
+}
+
+impl From<MappedKey> for KeyKind {
+    fn from(value: MappedKey) -> Self {
+        match value {
+            MappedKey::Raw(_) => Self::Raw,
+            MappedKey::Char(_) => Self::Char,
+        }
+    }
+}
 
 /// Chosen keyboard layout
 pub enum Layout {
@@ -139,18 +163,18 @@ static US_MAPPINGS: MappingType = const {
     map
 };
 
-pub fn usage_id_to_mapped_key(layout: Layout, usage_id: u8, modifers: Modifiers) -> Key {
+pub fn usage_id_to_mapped_key(layout: Layout, usage_id: u8, modifers: Modifiers) -> MappedKey {
     let mapping_table = match layout {
         Layout::Uk => &UK_MAPPINGS,
         Layout::Us => &US_MAPPINGS,
     };
     match mapping_table[usage_id as usize] {
-        Some(mapping) => Key::Char(
+        Some(mapping) => MappedKey::Char(
             mapping[match modifers.shift() {
                 false => 0,
                 true => 1,
             }],
         ),
-        _ => Key::Raw(usage_id),
+        _ => MappedKey::Raw(usage_id),
     }
 }

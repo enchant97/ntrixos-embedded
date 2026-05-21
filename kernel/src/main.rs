@@ -65,7 +65,7 @@ static mut DISPLAY_FB: [u8; 128 * 64] = [0; 128 * 64];
 const MAX_KEYBOARD_EVENTS_BACKLOG: usize = 6;
 static KEYBOARD_EVENT_CHANNEL: Channel<
     CriticalSectionRawMutex,
-    drivers::keyboard::KeyEvent,
+    sdk::drivers::keyboard::KeyEvent,
     MAX_KEYBOARD_EVENTS_BACKLOG,
 > = Channel::new();
 
