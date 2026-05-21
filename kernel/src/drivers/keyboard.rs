@@ -64,25 +64,23 @@ impl<'d, 's, T: SealedHostInstance> Keyboard<'d, 's, T> {
                     let modifiers = Modifiers::from_bits_truncate(report.modifiers);
 
                     // send events for released keys
-                    for prev_key in previous_keys {
-                        if let Some(prev_key) = prev_key {
-                            let mut exists = false;
-                            for current_key in current_keys {
-                                if let Some(current_key) = current_key
-                                    && current_key == prev_key
-                                {
-                                    exists = true;
-                                    break;
-                                }
+                    for prev_key in previous_keys.into_iter().flatten() {
+                        let mut exists = false;
+                        for current_key in current_keys {
+                            if let Some(current_key) = current_key
+                                && current_key == prev_key
+                            {
+                                exists = true;
+                                break;
                             }
-                            if !exists {
-                                self.push_event(KeyEvent {
-                                    key: prev_key,
-                                    action: Action::Release,
-                                    modifiers,
-                                })
-                                .await;
-                            }
+                        }
+                        if !exists {
+                            self.push_event(KeyEvent {
+                                key: prev_key,
+                                action: Action::Release,
+                                modifiers,
+                            })
+                            .await;
                         }
                     }
 
@@ -91,12 +89,11 @@ impl<'d, 's, T: SealedHostInstance> Keyboard<'d, 's, T> {
                         if let Some(current_key) = current_key {
                             let mut is_repeat = false;
                             for prev_key in previous_keys {
-                                if let Some(prev_key) = prev_key {
-                                    if prev_key == current_key {
+                                if let Some(prev_key) = prev_key
+                                    && prev_key == current_key {
                                         is_repeat = true;
                                         break;
                                     }
-                                }
                             }
                             if !is_repeat {
                                 // key is new
