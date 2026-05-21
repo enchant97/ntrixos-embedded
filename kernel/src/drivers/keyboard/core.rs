@@ -1,3 +1,5 @@
+use defmt::bitflags;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, defmt::Format)]
 pub enum Action {
     Press,
@@ -12,28 +14,30 @@ pub enum Key {
     Raw(u8),
 }
 
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, defmt::Format)]
-#[repr(transparent)]
-pub struct Modifiers(pub u8);
+bitflags! {
+    #[derive(Default)]
+    #[repr(transparent)]
+    pub struct Modifiers: u8 {
+        const CTRL = 1;
+        const SHIFT = 2;
+        const ALT = 4;
+        const META= 8;
+    }
+}
 
 #[allow(unused)]
 impl Modifiers {
-    pub const CTRL: u8 = 1;
-    pub const SHIFT: u8 = 2;
-    pub const ALT: u8 = 4;
-    pub const META: u8 = 8;
-
     pub fn shift(self) -> bool {
-        self.0 & Self::SHIFT != 0
+        self.contains(Modifiers::SHIFT)
     }
     pub fn ctrl(self) -> bool {
-        self.0 & Self::CTRL != 0
+        self.contains(Modifiers::CTRL)
     }
     pub fn alt(self) -> bool {
-        self.0 & Self::ALT != 0
+        self.contains(Modifiers::ALT)
     }
     pub fn meta(self) -> bool {
-        self.0 & Self::META != 0
+        self.contains(Modifiers::META)
     }
 }
 

@@ -20,7 +20,7 @@ fn report_to_keys(report: &KeyboardReport, keys: &mut [Option<Key>; 6]) {
                 // TODO get layout from user preferences
                 layout::Layout::Uk,
                 key,
-                Modifiers(report.modifiers),
+                Modifiers::from_bits_truncate(report.modifiers),
             ));
         }
     }
@@ -61,7 +61,7 @@ impl<'d, 's, T: SealedHostInstance> Keyboard<'d, 's, T> {
                 Ok(Some(report)) => {
                     // process new report
                     report_to_keys(&report, &mut current_keys);
-                    let modifiers = Modifiers(report.modifiers);
+                    let modifiers = Modifiers::from_bits_truncate(report.modifiers);
 
                     // send events for released keys
                     for prev_key in previous_keys {
