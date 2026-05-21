@@ -14,9 +14,9 @@ unsafe extern "C" {
 
 unsafe fn init_memory() {
     // copy .data from flash to RAM
-    let mut src = &raw const _data_load as *const u32;
-    let mut dst = &raw mut _data_start as *mut u32;
-    let end = &raw const _data_end as *const u32;
+    let mut src = &raw const _data_load;
+    let mut dst = &raw mut _data_start;
+    let end = &raw const _data_end;
     while dst < end as *mut u32 {
         unsafe {
             dst.write_volatile(src.read());
@@ -26,8 +26,8 @@ unsafe fn init_memory() {
     }
 
     // zero .bss
-    let mut bss = &raw mut _bss_start as *mut u32;
-    let bss_end = &raw const _bss_end as *const u32;
+    let mut bss = &raw mut _bss_start;
+    let bss_end = &raw const _bss_end;
     while bss < bss_end as *mut u32 {
         unsafe {
             bss.write_volatile(0);

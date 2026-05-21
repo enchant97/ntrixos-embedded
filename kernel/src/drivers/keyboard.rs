@@ -85,25 +85,24 @@ impl<'d, 's, T: SealedHostInstance> Keyboard<'d, 's, T> {
                     }
 
                     // send events for new keys
-                    for current_key in current_keys {
-                        if let Some(current_key) = current_key {
-                            let mut is_repeat = false;
-                            for prev_key in previous_keys {
-                                if let Some(prev_key) = prev_key
-                                    && prev_key == current_key {
-                                        is_repeat = true;
-                                        break;
-                                    }
+                    for current_key in current_keys.into_iter().flatten() {
+                        let mut is_repeat = false;
+                        for prev_key in previous_keys {
+                            if let Some(prev_key) = prev_key
+                                && prev_key == current_key
+                            {
+                                is_repeat = true;
+                                break;
                             }
-                            if !is_repeat {
-                                // key is new
-                                self.push_event(KeyEvent {
-                                    key: current_key,
-                                    action: Action::Press,
-                                    modifiers,
-                                })
-                                .await;
-                            }
+                        }
+                        if !is_repeat {
+                            // key is new
+                            self.push_event(KeyEvent {
+                                key: current_key,
+                                action: Action::Press,
+                                modifiers,
+                            })
+                            .await;
                         }
                     }
 
