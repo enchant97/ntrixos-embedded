@@ -2,22 +2,23 @@
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum DisplayOperation {
     GetMode,
-    SetMode,
+    SetModePixel,
+    SetModeCharacter,
     GetStat,
 }
 
 #[repr(C)]
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum DisplayMode {
-    Text,
-    Graphics,
+    Pixel,
+    Character,
 }
 
 #[repr(C)]
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub struct DisplayStat {
-    /// depending on current display mode: characters or pixels
-    pub width: u32,
-    /// depending on current display mode: characters or pixels
-    pub height: u32,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    pub char_rows: u32,
+    pub char_cols: u32,
 }

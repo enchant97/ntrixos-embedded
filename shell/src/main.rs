@@ -53,7 +53,7 @@ pub extern "C" fn _start(abi: *const KernelAbi) -> ExitCode {
     }
     libsys::core::sys_init(abi);
     libsys::display::display().lock(|d| {
-        d.set_display_mode(DisplayMode::Text)
+        d.set_display_mode(DisplayMode::Character)
             .expect("failed to set mode");
         d.get_framebuffer_mut(|mut fb| {
             let msg = b"Hello World!";
@@ -70,7 +70,6 @@ pub extern "C" fn _start(abi: *const KernelAbi) -> ExitCode {
             libsys::display::display().lock(|d| {
                 d.get_framebuffer_mut(|mut fb| {
                     let msg = format_args!("Key Pressed = {}", char::from(key_event.unwrap().code));
-                    let mut fb = &mut fb[64..128];
                     fb.fill(0);
                     fb.write_fmt(msg).unwrap();
                 });

@@ -1,181 +1,112 @@
-//! ST7920 SPI Driver
-//!
-//! Based on: <https://github.com/wjakobczyk/st7920/tree/master>
-//! Based on: <https://github.com/enchant97/micropython-st7920>
-
 use embedded_graphics::{
-    Pixel,
-    pixelcolor::BinaryColor,
-    prelude::{DrawTarget, OriginDimensions, Size},
+    Drawable,
+    framebuffer::{Framebuffer, buffer_size},
+    geometry::{Point, Size},
+    mono_font::MonoTextStyle,
+    pixelcolor::{
+        BinaryColor,
+        raw::{LittleEndian, RawU1},
+    },
+    primitives::{Primitive, PrimitiveStyle, Rectangle},
+    text::{Alignment, Text, renderer::TextRenderer},
 };
 use embedded_hal::digital::OutputPin;
 use embedded_hal_async::{delay::DelayNs, spi::SpiBus};
 
-#[repr(u8)]
-enum Instruction {
-    BasicFunction = 0x30,
-    ExtendedFunction = 0x34,
-    ClearScreen = 0x01,
-    EntryMode = 0x06,
-    DisplayOnCursorOff = 0x0C,
-    GraphicsOn = 0x36,
-    SetGraphicsAddress = 0x80,
+mod st7920;
+
+use ibm437::IBM437_8X8_REGULAR;
+pub use st7920::ST7920;
+
+use crate::drivers::display::st7920::{HEIGHT, WIDTH};
+
+pub const PIXEL_HEIGHT: usize = HEIGHT;
+pub const PIXEL_WIDTH: usize = WIDTH;
+pub const CHAR_ROWS: usize = HEIGHT / IBM437_8X8_REGULAR.character_size.height as usize;
+pub const CHAR_COLS: usize = WIDTH / IBM437_8X8_REGULAR.character_size.width as usize;
+pub const CHAR_BUFFER_SIZE: usize = CHAR_ROWS * CHAR_COLS;
+
+pub struct DisplayDriver<SPI, CS> {
+    raw_display: ST7920<SPI, CS>,
+    frame_buffer: Framebuffer<
+        BinaryColor,
+        RawU1,
+        LittleEndian,
+        WIDTH,
+        HEIGHT,
+        { buffer_size::<BinaryColor>(WIDTH, HEIGHT) },
+    >,
+    char_buffer: [u8; CHAR_BUFFER_SIZE],
 }
 
-const INIT_INSTRUCTIONS: [Instruction; 7] = [
-    Instruction::BasicFunction,
-    Instruction::BasicFunction,
-    Instruction::DisplayOnCursorOff,
-    Instruction::ClearScreen,
-    Instruction::EntryMode,
-    Instruction::ExtendedFunction,
-    Instruction::GraphicsOn,
-];
-pub const WIDTH: u32 = 128;
-pub const HEIGHT: u32 = 64;
-const ROW_SIZE: usize = (WIDTH / 8) as usize;
-const BUFFER_SIZE: usize = ROW_SIZE * HEIGHT as usize;
-
-pub struct ST7920<SPI, CS> {
-    spi: SPI,
-    cs: CS,
-    buffer: [u8; BUFFER_SIZE],
-    flip: bool,
-}
-
-impl<SPI, CS> ST7920<SPI, CS>
+impl<SPI, CS> DisplayDriver<SPI, CS>
 where
     SPI: SpiBus,
     CS: OutputPin,
 {
-    pub const fn width() -> u32 {
-        WIDTH
+    pub const fn pixel_width(&self) -> usize {
+        PIXEL_WIDTH
     }
 
-    pub const fn height() -> u32 {
-        HEIGHT
+    pub const fn pixel_height(&self) -> usize {
+        PIXEL_HEIGHT
     }
 
-    pub fn new(spi: SPI, cs: CS, flip: bool) -> Self {
-        let buffer = [0; BUFFER_SIZE];
+    pub const fn char_rows(&self) -> usize {
+        CHAR_ROWS
+    }
+
+    pub const fn char_columns(&self) -> usize {
+        CHAR_COLS
+    }
+
+    pub fn new(raw_display: ST7920<SPI, CS>) -> Self {
         Self {
-            spi,
-            cs,
-            buffer,
-            flip,
+            raw_display,
+            frame_buffer: Framebuffer::new(),
+            char_buffer: [0; CHAR_BUFFER_SIZE],
         }
     }
 
-    async fn write_command(&mut self, byte: u8, delay: &mut impl DelayNs) {
-        self.spi.write(&[0xf8]).await.unwrap();
-        delay.delay_us(50).await;
-        self.spi.write(&[byte & 0xf0]).await.unwrap();
-        delay.delay_us(50).await;
-        self.spi.write(&[(byte << 4) & 0xf0]).await.unwrap();
-        delay.delay_us(50).await;
+    pub unsafe fn pixel_buffer_as_mut_ptr(&mut self) -> *mut u8 {
+        self.frame_buffer.data_mut().as_mut_ptr()
     }
 
-    async fn write_data(&mut self, byte: u8, delay: &mut impl DelayNs) {
-        self.spi.write(&[0xf8 | 0x02]).await.unwrap();
-        delay.delay_us(50).await;
-        self.spi.write(&[byte & 0xf0]).await.unwrap();
-        delay.delay_us(50).await;
-        self.spi.write(&[(byte << 4) & 0xf0]).await.unwrap();
-        delay.delay_us(50).await;
+    pub unsafe fn char_buffer_as_mut_ptr(&mut self) -> *mut u8 {
+        self.char_buffer.as_mut_ptr()
     }
 
-    async fn set_graphics_address(&mut self, x: u8, y: u8, delay: &mut impl DelayNs) {
-        self.write_command(Instruction::SetGraphicsAddress as u8 | y, delay)
-            .await;
-        self.write_command(Instruction::SetGraphicsAddress as u8 | x, delay)
-            .await;
-    }
-
-    pub async fn init(&mut self, delay: &mut impl DelayNs) {
-        self.cs.set_high().unwrap();
-        for instruction in INIT_INSTRUCTIONS {
-            self.write_command(instruction as u8, delay).await;
-            delay.delay_ms(2).await;
-        }
-        self.cs.set_low().unwrap();
-    }
-
-    #[inline]
-    fn set_pixel_unchecked(&mut self, mut x: u8, mut y: u8, mut val: u8) {
-        if val > 1 {
-            val = 0;
-        }
-        if self.flip {
-            y = (Self::height() - 1) as u8 - y;
-            x = (Self::width() - 1) as u8 - x;
-        }
-        let idx = y as usize * ROW_SIZE + x as usize / 8;
-        let x_mask = 0x80 >> (x % 8);
-        if val != 0 {
-            self.buffer[idx] |= x_mask;
-        } else {
-            self.buffer[idx] &= !x_mask;
+    /// Render the character buffer onto the pixel buffer
+    pub fn render_chars(&mut self) {
+        let font = IBM437_8X8_REGULAR;
+        let text_style = MonoTextStyle::new(&font, BinaryColor::On);
+        let background_style = PrimitiveStyle::with_fill(BinaryColor::Off);
+        // draw zero over whole canvas
+        Rectangle::new(
+            Point::zero(),
+            Size::new(self.pixel_width() as u32, self.pixel_height() as u32),
+        )
+        .into_styled(background_style)
+        .draw(&mut self.frame_buffer)
+        .unwrap();
+        // draw line-by-line
+        let mut point = Point::new(0, font.character_size.height as i32);
+        for line_i in 0..self.char_rows() {
+            let line;
+            line =
+                &self.char_buffer[line_i * self.char_columns()..(line_i + 1) * self.char_columns()];
+            let text_line = str::from_utf8(line).unwrap().trim_end_matches("\0");
+            Text::with_alignment(text_line, point, text_style, Alignment::Left)
+                .draw(&mut self.frame_buffer)
+                .unwrap();
+            point += Size::new(0, text_style.line_height());
         }
     }
 
-    #[inline]
-    pub fn set_pixel(&mut self, x: u8, y: u8, val: u8) {
-        if x < Self::width() as u8 && y < Self::height() as u8 {
-            self.set_pixel_unchecked(x, y, val);
-        }
-    }
-
-    #[inline]
+    /// Flush the software buffer onto the physical display
     pub async fn flush(&mut self, delay: &mut impl DelayNs) {
-        self.cs.set_high().unwrap();
-        for y in 0..Self::height() as u8 {
-            let row_offset = (y as u32) * 16;
-            if y < 32 {
-                self.set_graphics_address(0, y, delay).await;
-            } else {
-                self.set_graphics_address(8, y - 32, delay).await;
-            }
-            for i in 0..16 {
-                self.write_data(self.buffer[(row_offset + i) as usize], delay)
-                    .await;
-            }
-        }
-        self.cs.set_low().unwrap();
-    }
-}
-
-impl<SPI, CS> OriginDimensions for ST7920<SPI, CS>
-where
-    SPI: SpiBus,
-    CS: OutputPin,
-{
-    fn size(&self) -> Size {
-        Size::new(Self::width(), Self::height())
-    }
-}
-
-impl<SPI, CS> DrawTarget for ST7920<SPI, CS>
-where
-    SPI: SpiBus,
-    CS: OutputPin,
-{
-    type Color = BinaryColor;
-    type Error = ();
-
-    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
-    {
-        for Pixel(coord, color) in pixels.into_iter() {
-            self.set_pixel(
-                coord.x as u8,
-                coord.y as u8,
-                match color {
-                    BinaryColor::On => 1,
-                    BinaryColor::Off => 0,
-                },
-            );
-        }
-        Ok(())
+        self.raw_display
+            .update(delay, &self.frame_buffer.data())
+            .await;
     }
 }

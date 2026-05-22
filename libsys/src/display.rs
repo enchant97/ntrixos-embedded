@@ -2,6 +2,7 @@ use crate::fd::FileDesc;
 use core::{
     cell::{RefCell, RefMut},
     ffi::c_void,
+    mem::MaybeUninit,
     ptr::{null, null_mut},
 };
 use embassy_sync::blocking_mutex::{Mutex, raw::ThreadModeRawMutex};
@@ -25,7 +26,7 @@ impl Display {
 
 impl DisplayRaw {
     pub fn get_display_mode(&self) -> Result<DisplayMode, ExitCode> {
-        let mut display_mode = DisplayMode::Text;
+        let mut display_mode = DisplayMode::Character;
         FileDesc::from_fd(FileDescriptor::Display)
             .ioctl(
                 DisplayOperation::GetMode as usize,
@@ -37,29 +38,29 @@ impl DisplayRaw {
 
     pub fn set_display_mode(&mut self, display_mode: DisplayMode) -> Result<(), ExitCode> {
         FileDesc::from_fd(FileDescriptor::Display).ioctl(
-            DisplayOperation::SetMode as usize,
+            match display_mode {
+                DisplayMode::Pixel => DisplayOperation::SetModePixel as usize,
+                DisplayMode::Character => DisplayOperation::SetModeCharacter as usize,
+            },
             &raw const display_mode as *mut c_void,
             null_mut(),
         )
     }
 
     pub fn get_display_stat(&self) -> Result<DisplayStat, ExitCode> {
-        let mut display_stat = DisplayStat {
-            width: 0,
-            height: 0,
-        };
+        let mut display_stat = MaybeUninit::uninit();
         FileDesc::from_fd(FileDescriptor::Display)
             .ioctl(
                 DisplayOperation::GetStat as usize,
                 null(),
                 &raw mut display_stat as *mut c_void,
             )
-            .map(|()| display_stat)
+            .map(|()| unsafe { display_stat.assume_init() })
     }
 
     pub fn get_framebuffer_mut(&mut self, op: impl FnOnce(&mut [u8])) {
         op(FileDesc::from_fd(FileDescriptor::Display)
-            .mmap(128 * 64)
+            .mmap(16 * 8) // HACK get actual size from stat & current mode
             .unwrap())
     }
 }

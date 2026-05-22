@@ -3,8 +3,8 @@
 #![allow(static_mut_refs)]
 
 use assign_resources::assign_resources;
+use core::ffi::c_void;
 use core::ptr::{addr_of_mut, null_mut};
-use core::{ffi::c_void, str};
 use embassy_executor::Executor;
 use embassy_futures::join::join;
 use embassy_rp::peripherals::USB;
@@ -18,22 +18,12 @@ use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
 use embassy_time::Delay;
-use embedded_graphics::prelude::Primitive;
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::{
-    Drawable,
-    mono_font::MonoTextStyle,
-    pixelcolor::BinaryColor,
-    prelude::{Point, Size},
-    text::{Alignment, Text, renderer::TextRenderer},
-};
-use ibm437::IBM437_8X8_REGULAR;
 use sdk::{ExitCode, FileDescriptor, KernelAbi};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::common::AppEntry;
-use crate::drivers::display::ST7920;
+use crate::drivers::display::{DisplayDriver, ST7920};
 use crate::memory::get_shell_app_entry;
 
 mod common;
@@ -62,9 +52,8 @@ pub static APP_EXIT_SIG: Signal<CriticalSectionRawMutex, ExitCode> = Signal::new
 pub static APP_LAUNCH_SIG: Signal<CriticalSectionRawMutex, AppEntry> = Signal::new();
 
 static FLUSH_DISPLAY_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-// NOTE "static mut" is generally not a good idea. But may be required for this kernel?
-// display buffer that either stores text or pixel data, depending on current mode.
-static mut DISPLAY_FB: [u8; 128 * 64] = [0; 128 * 64];
+static mut DISPLAY_PIXEL_BUFFER: *mut u8 = null_mut();
+static mut DISPLAY_CHAR_BUFFER: *mut u8 = null_mut();
 
 const MAX_KEYBOARD_EVENTS_BACKLOG: usize = 6;
 static KEYBOARD_EVENT_CHANNEL: Channel<
@@ -151,7 +140,10 @@ extern "C" fn abi_seek(fd: FileDescriptor, offset: usize) {
 
 extern "C" fn abi_mmap(fd: FileDescriptor) -> *mut c_void {
     match fd {
-        FileDescriptor::Display => unsafe { DISPLAY_FB.as_mut_ptr() as *mut c_void },
+        FileDescriptor::Display => unsafe {
+            // HACK assumes character-mode
+            DISPLAY_CHAR_BUFFER as *mut c_void
+        },
         FileDescriptor::KeyEvents => null_mut() as *mut c_void,
     }
 }
@@ -172,44 +164,24 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
     display_spi_config.frequency = 600000;
     let display_spi = Spi::new_txonly(r.spi, r.sck, r.mosi, r.dma, Irqs, display_spi_config);
     let display_spi_cs = gpio::Output::new(r.cs, gpio::Level::Low);
-    let mut display = ST7920::new(display_spi, display_spi_cs, false);
+    let mut raw_display = ST7920::new(display_spi, display_spi_cs, false);
     let mut delay = Delay {};
-    display.init(&mut delay).await;
+    raw_display.init(&mut delay).await;
+    let mut display = DisplayDriver::new(raw_display);
+    unsafe {
+        DISPLAY_PIXEL_BUFFER = display.pixel_buffer_as_mut_ptr();
+        DISPLAY_CHAR_BUFFER = display.char_buffer_as_mut_ptr();
+    }
     display.flush(&mut delay).await;
 
     defmt::debug!("signal core1 to launch shell process");
     APP_LAUNCH_SIG.signal(get_shell_app_entry());
     cortex_m::asm::sev();
 
-    let font = IBM437_8X8_REGULAR;
-    let text_style = MonoTextStyle::new(&font, BinaryColor::On);
-    let background_style = PrimitiveStyle::with_fill(BinaryColor::Off);
-
     loop {
         defmt::debug!("waiting for next display flush");
         FLUSH_DISPLAY_SIG.wait().await;
-        // XXX assumes always in text-mode
-        // draw zero over whole canvas
-        Rectangle::new(Point::zero(), Size::new(128, 64))
-            .into_styled(background_style)
-            .draw(&mut display)
-            .unwrap();
-        // draw line-by-line
-        let mut point = Point::new(0, font.character_size.height as i32);
-        let n_lines = 64 / font.character_size.height as usize;
-        let line_length = 128 / font.character_size.width as usize;
-        for line_i in 0..n_lines {
-            let line;
-            unsafe {
-                line = &DISPLAY_FB[line_i * line_length..(line_i + 1) * line_length];
-            }
-            defmt::debug!("{:?}", line);
-            let text_line = str::from_utf8(line).unwrap().trim_end_matches("\0");
-            Text::with_alignment(text_line, point, text_style, Alignment::Left)
-                .draw(&mut display)
-                .unwrap();
-            point += Size::new(0, text_style.line_height());
-        }
+        display.render_chars(); // HACK assumes in character-mode
         display.flush(&mut delay).await;
         defmt::debug!("done display flush");
     }
