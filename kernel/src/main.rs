@@ -19,14 +19,15 @@ use embassy_sync::{
 };
 use embassy_time::Delay;
 use embedded_graphics::prelude::Primitive;
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle, StyledDrawable};
+use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::{
     Drawable,
-    mono_font::{MonoTextStyle, ascii::FONT_4X6},
+    mono_font::MonoTextStyle,
     pixelcolor::BinaryColor,
     prelude::{Point, Size},
     text::{Alignment, Text, renderer::TextRenderer},
 };
+use ibm437::IBM437_8X8_REGULAR;
 use sdk::{ExitCode, FileDescriptor, KernelAbi};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
@@ -180,7 +181,7 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
     APP_LAUNCH_SIG.signal(get_shell_app_entry());
     cortex_m::asm::sev();
 
-    let font = FONT_4X6;
+    let font = IBM437_8X8_REGULAR;
     let text_style = MonoTextStyle::new(&font, BinaryColor::On);
     let background_style = PrimitiveStyle::with_fill(BinaryColor::Off);
 
