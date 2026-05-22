@@ -100,7 +100,10 @@ where
         self.cs.set_high().unwrap();
         for y in 0..Self::height() {
             // check if row needs update
-            if self.buffer[y..y + Self::width()] == new_buffer[y..y + Self::width()] {
+            let row_start = y * ROW_SIZE;
+            if self.buffer[row_start..row_start + ROW_SIZE]
+                == new_buffer[row_start..row_start + ROW_SIZE]
+            {
                 continue;
             }
             let row_offset = y * 16;
