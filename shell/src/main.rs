@@ -55,29 +55,31 @@ pub extern "C" fn _start(abi: *const KernelAbi) -> ExitCode {
     libsys::display::display().lock(|d| {
         d.set_display_mode(DisplayMode::Character)
             .expect("failed to set mode");
-        d.get_framebuffer_mut(|mut fb| {
+        d.get_buffer_mut(|mut fb| {
             let msg = b"Hello World!";
             fb.write_all(msg).unwrap();
         });
         d.flush().expect("fail to flush display buffer");
     });
-    loop {
-        let mut key_event: Option<KeyEvent> = None;
-        libsys::keyboard::keyboard().lock(|kb| {
-            key_event = Some(kb.read_key_blocking().unwrap());
-        });
-        if key_event.unwrap().action == Action::Press && key_event.unwrap().kind == KeyKind::Char {
-            libsys::display::display().lock(|d| {
-                d.get_framebuffer_mut(|mut fb| {
-                    let msg = format_args!("Key Pressed = {}", char::from(key_event.unwrap().code));
-                    fb.fill(0);
-                    fb.write_fmt(msg).unwrap();
+
+    libsys::keyboard::keyboard().lock(|kb| {
+        let mut key_event: KeyEvent;
+        loop {
+            key_event = kb.read_key_blocking().unwrap();
+            if key_event.action == Action::Press && key_event.kind == KeyKind::Char {
+                libsys::display::display().lock(|d| {
+                    d.get_buffer_mut(|mut fb| {
+                        let msg = format_args!("Key Pressed = {}", char::from(key_event.code));
+                        fb.fill(0);
+                        fb.write_fmt(msg).unwrap();
+                    });
+                    d.flush().expect("fail to flush display buffer");
                 });
-                d.flush().expect("fail to flush display buffer");
-            });
-        } else if key_event.unwrap().code == 0x29 {
-            break;
+            } else if key_event.code == 0x29 {
+                break;
+            }
         }
-    }
+    });
+
     ExitCode::Ok
 }

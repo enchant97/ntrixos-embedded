@@ -16,6 +16,7 @@ use embedded_hal_async::{delay::DelayNs, spi::SpiBus};
 mod st7920;
 
 use ibm437::IBM437_8X8_REGULAR;
+use sdk::drivers::display::DisplayStat;
 pub use st7920::ST7920;
 
 use crate::drivers::display::st7920::{HEIGHT, WIDTH};
@@ -25,6 +26,12 @@ pub const PIXEL_WIDTH: usize = WIDTH;
 pub const CHAR_ROWS: usize = HEIGHT / IBM437_8X8_REGULAR.character_size.height as usize;
 pub const CHAR_COLS: usize = WIDTH / IBM437_8X8_REGULAR.character_size.width as usize;
 pub const CHAR_BUFFER_SIZE: usize = CHAR_ROWS * CHAR_COLS;
+pub const DISPLAY_STAT: DisplayStat = DisplayStat {
+    pixel_width: PIXEL_WIDTH as u32,
+    pixel_height: PIXEL_HEIGHT as u32,
+    char_rows: CHAR_ROWS as u32,
+    char_cols: CHAR_COLS as u32,
+};
 
 pub struct DisplayDriver<SPI, CS> {
     raw_display: ST7920<SPI, CS>,

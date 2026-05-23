@@ -1,5 +1,7 @@
+use num_enum::TryFromPrimitive;
+
+#[derive(PartialEq, Clone, Copy, Debug, TryFromPrimitive)]
 #[repr(usize)]
-#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum DisplayOperation {
     GetMode,
     SetModePixel,

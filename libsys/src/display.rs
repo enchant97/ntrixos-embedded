@@ -26,14 +26,14 @@ impl Display {
 
 impl DisplayRaw {
     pub fn get_display_mode(&self) -> Result<DisplayMode, ExitCode> {
-        let mut display_mode = DisplayMode::Character;
+        let mut display_mode = MaybeUninit::uninit();
         FileDesc::from_fd(FileDescriptor::Display)
             .ioctl(
                 DisplayOperation::GetMode as usize,
                 null(),
                 &raw mut display_mode as *mut c_void,
             )
-            .map(|()| display_mode)
+            .map(|()| unsafe { display_mode.assume_init() })
     }
 
     pub fn set_display_mode(&mut self, display_mode: DisplayMode) -> Result<(), ExitCode> {
@@ -58,9 +58,16 @@ impl DisplayRaw {
             .map(|()| unsafe { display_stat.assume_init() })
     }
 
-    pub fn get_framebuffer_mut(&mut self, op: impl FnOnce(&mut [u8])) {
+    pub fn get_buffer_mut(&mut self, op: impl FnOnce(&mut [u8])) {
+        // PERF getting mode+stat each time is costly
+        let mode = self.get_display_mode().unwrap();
+        let stat = self.get_display_stat().unwrap();
+        let buffer_size = match mode {
+            DisplayMode::Pixel => (stat.pixel_width / 8) * stat.pixel_height,
+            DisplayMode::Character => stat.char_rows * stat.char_cols,
+        };
         op(FileDesc::from_fd(FileDescriptor::Display)
-            .mmap(16 * 8) // HACK get actual size from stat & current mode
+            .mmap(buffer_size as usize)
             .unwrap())
     }
 }

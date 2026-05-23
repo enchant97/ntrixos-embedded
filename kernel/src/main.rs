@@ -18,12 +18,13 @@ use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
 use embassy_time::Delay;
+use sdk::drivers::display::{DisplayMode, DisplayOperation, DisplayStat};
 use sdk::{ExitCode, FileDescriptor, KernelAbi};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::common::AppEntry;
-use crate::drivers::display::{DisplayDriver, ST7920};
+use crate::drivers::display::{DISPLAY_STAT, DisplayDriver, ST7920};
 use crate::memory::get_shell_app_entry;
 
 mod common;
@@ -154,6 +155,22 @@ extern "C" fn abi_ioctl(
     in_arg: *const c_void,
     out_arg: *mut c_void,
 ) -> ExitCode {
+    match fd {
+        FileDescriptor::Display => {
+            let disp_op = DisplayOperation::try_from(op).unwrap();
+            match disp_op {
+                DisplayOperation::GetMode => unsafe {
+                    *(out_arg as *mut DisplayMode) = DisplayMode::Character;
+                },
+                DisplayOperation::GetStat => unsafe {
+                    *(out_arg as *mut DisplayStat) = DISPLAY_STAT;
+                },
+                DisplayOperation::SetModeCharacter => {}
+                _ => todo!(),
+            }
+        }
+        _ => todo!(),
+    }
     ExitCode::Ok
 }
 

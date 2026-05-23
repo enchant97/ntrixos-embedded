@@ -1612,6 +1612,7 @@ dependencies = [
  "bitflags 2.11.0",
  "cbindgen",
  "defmt 1.1.0",
+ "num_enum",
 ]
 
 [[package]]
