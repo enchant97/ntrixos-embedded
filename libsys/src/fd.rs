@@ -38,7 +38,7 @@ impl FileDesc {
         (abi().flush)(self.descriptor);
     }
 
-    pub fn mmap(&mut self, len: usize) -> Option<&mut [u8]> {
+    pub fn mmap<'a>(&mut self, len: usize) -> Option<&'a mut [u8]> {
         let ptr = (abi().mmap)(self.descriptor);
         if ptr.is_null() {
             None

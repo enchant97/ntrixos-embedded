@@ -58,7 +58,7 @@ impl DisplayRaw {
             .map(|()| unsafe { display_stat.assume_init() })
     }
 
-    pub fn get_buffer_mut(&mut self, op: impl FnOnce(&mut [u8])) {
+    fn buffer_mut(&mut self) -> &mut [u8] {
         // PERF getting mode+stat each time is costly
         let mode = self.get_display_mode().unwrap();
         let stat = self.get_display_stat().unwrap();
@@ -66,9 +66,22 @@ impl DisplayRaw {
             DisplayMode::Pixel => (stat.pixel_width / 8) * stat.pixel_height,
             DisplayMode::Character => stat.char_rows * stat.char_cols,
         };
-        op(FileDesc::from_fd(FileDescriptor::Display)
+        FileDesc::from_fd(FileDescriptor::Display)
             .mmap(buffer_size as usize)
-            .unwrap())
+            .unwrap()
+    }
+
+    /// Get a mutable buffer.
+    #[inline]
+    pub fn with_buffer(&mut self, op: impl FnOnce(&mut [u8])) {
+        op(self.buffer_mut());
+    }
+
+    /// Get a mutable buffer and flush once operation is complete.
+    #[inline]
+    pub fn with_buffer_flushed(&mut self, op: impl FnOnce(&mut [u8])) {
+        self.with_buffer(op);
+        self.flush().expect("failed to flush");
     }
 }
 
