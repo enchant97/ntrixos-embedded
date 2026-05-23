@@ -5,8 +5,10 @@ pub mod core;
 pub mod display;
 pub mod fd;
 pub mod keyboard;
+pub mod mem;
 pub mod process;
 
+pub use libsys_macros::entrypoint;
 /// Re-Export of SDK
 pub use sdk;
 

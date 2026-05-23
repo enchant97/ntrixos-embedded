@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+libsys-macros = { path = "../libsys-macros" }
 sdk = { path = "../sdk" }
 nostd = { version = "0.1", default-features = false, features = [ "io" ] }
 embassy-sync = "0.8"

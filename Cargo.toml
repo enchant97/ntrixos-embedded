@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["kernel", "sdk", "libsys", "shell"]
+members = ["kernel", "sdk", "libsys", "shell", "libsys-macros"]
 
 [profile.release]
 opt-level = "z"

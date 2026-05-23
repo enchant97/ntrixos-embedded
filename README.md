@@ -11,6 +11,7 @@ An experimental "from scratch" operating system project aimed at the RP2040/RP23
 - `kernel` - The Kernel
 - `sdk` - Shared types and definitions for kernel + apps to link to.
 - `libsys` - A friendly Rust interface for using the ABI
+- `libsys-macros` - Proc macros used by `libsys`
 - `shell` - User control via CLI
 - `apps/` - external apps
 

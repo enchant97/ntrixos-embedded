@@ -1131,8 +1131,18 @@ name = "libsys"
 version = "0.1.0"
 dependencies = [
  "embassy-sync",
+ "libsys-macros",
  "nostd",
  "sdk",
+]
+
+[[package]]
+name = "libsys-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
