@@ -99,8 +99,7 @@ where
         // draw line-by-line
         let mut point = Point::new(0, font.character_size.height as i32);
         for line_i in 0..self.char_rows() {
-            let line;
-            line =
+            let line =
                 &self.char_buffer[line_i * self.char_columns()..(line_i + 1) * self.char_columns()];
             let text_line = str::from_utf8(line).unwrap().trim_end_matches("\0");
             Text::with_alignment(text_line, point, text_style, Alignment::Left)
@@ -113,7 +112,7 @@ where
     /// Flush the software buffer onto the physical display
     pub async fn flush(&mut self, delay: &mut impl DelayNs) {
         self.raw_display
-            .update(delay, &self.frame_buffer.data())
+            .update(delay, self.frame_buffer.data())
             .await;
     }
 }

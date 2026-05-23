@@ -9,7 +9,9 @@ unsafe extern "C" {
 
 /// Init the app memory, called once on program start.
 ///
-/// Do not call if using `#[entrypoint]`
+/// # Safety
+/// - Must be called once in main function and be the first operation.
+/// - Must not be called if using `#[libsys::entrypoint]`
 pub unsafe fn init_memory() {
     // copy .data from flash to RAM
     let mut src = &raw const _data_load;

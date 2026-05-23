@@ -26,6 +26,12 @@ impl FileDesc {
         Ok(out_read as usize)
     }
 
+    /// Read directly from kernel to pointer.
+    ///
+    /// Can be used when descriptor returns a different data-type than `[u8; N]`.
+    ///
+    /// # Safety
+    /// Must provide a valid memory address that matches the size of `buf_len`.
     pub unsafe fn read_ptr(&self, buf: *mut u8, buf_len: usize) -> Result<usize, ExitCode> {
         let out_read = (abi().read)(self.descriptor, buf, buf_len);
         if out_read < 0 {

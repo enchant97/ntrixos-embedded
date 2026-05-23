@@ -28,8 +28,8 @@ const INIT_INSTRUCTIONS: [Instruction; 7] = [
 ];
 pub const WIDTH: usize = 128;
 pub const HEIGHT: usize = 64;
-const ROW_SIZE: usize = (WIDTH / 8) as usize;
-pub const BUFFER_SIZE: usize = ROW_SIZE * HEIGHT as usize;
+const ROW_SIZE: usize = WIDTH / 8;
+pub const BUFFER_SIZE: usize = ROW_SIZE * HEIGHT;
 
 pub struct ST7920<SPI, CS> {
     spi: SPI,
@@ -113,8 +113,7 @@ where
                 self.set_graphics_address(8, y as u8 - 32, delay).await;
             }
             for i in 0..16 {
-                self.write_data(new_buffer[(row_offset + i) as usize], delay)
-                    .await;
+                self.write_data(new_buffer[row_offset + i], delay).await;
             }
         }
         self.buffer.copy_from_slice(new_buffer);

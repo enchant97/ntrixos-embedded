@@ -145,7 +145,7 @@ extern "C" fn abi_mmap(fd: FileDescriptor) -> *mut c_void {
             // HACK assumes character-mode
             DISPLAY_CHAR_BUFFER as *mut c_void
         },
-        FileDescriptor::KeyEvents => null_mut() as *mut c_void,
+        FileDescriptor::KeyEvents => null_mut(),
     }
 }
 
