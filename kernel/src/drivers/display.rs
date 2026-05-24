@@ -7,8 +7,10 @@ use embedded_graphics::{
         BinaryColor,
         raw::{LittleEndian, RawU1},
     },
-    primitives::{Primitive, PrimitiveStyle, Rectangle},
-    text::{Alignment, Text, renderer::TextRenderer},
+    text::{
+        Alignment, Text,
+        renderer::{CharacterStyle, TextRenderer},
+    },
 };
 use embedded_hal::digital::OutputPin;
 use embedded_hal_async::{delay::DelayNs, spi::SpiBus};
@@ -86,16 +88,8 @@ where
     /// Render the character buffer onto the pixel buffer
     pub fn render_chars(&mut self) {
         let font = IBM437_8X8_REGULAR;
-        let text_style = MonoTextStyle::new(&font, BinaryColor::On);
-        let background_style = PrimitiveStyle::with_fill(BinaryColor::Off);
-        // draw zero over whole canvas
-        Rectangle::new(
-            Point::zero(),
-            Size::new(self.pixel_width() as u32, self.pixel_height() as u32),
-        )
-        .into_styled(background_style)
-        .draw(&mut self.frame_buffer)
-        .unwrap();
+        let mut text_style = MonoTextStyle::new(&font, BinaryColor::On);
+        text_style.set_background_color(Some(BinaryColor::Off));
         // draw line-by-line
         let mut point = Point::new(0, font.character_size.height as i32);
         for line_i in 0..self.char_rows() {
