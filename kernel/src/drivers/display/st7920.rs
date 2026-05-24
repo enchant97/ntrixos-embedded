@@ -95,6 +95,22 @@ where
         self.cs.set_low().unwrap();
     }
 
+    pub async fn clear(&mut self, delay: &mut impl DelayNs) {
+        self.cs.set_high().unwrap();
+        for y in 0..Self::height() {
+            if y < 32 {
+                self.set_graphics_address(0, y as u8, delay).await;
+            } else {
+                self.set_graphics_address(8, y as u8 - 32, delay).await;
+            }
+            for _ in 0..16 {
+                self.write_data(0, delay).await;
+            }
+        }
+        self.buffer.fill(0);
+        self.cs.set_low().unwrap();
+    }
+
     #[inline]
     pub async fn update(&mut self, delay: &mut impl DelayNs, new_buffer: &[u8; BUFFER_SIZE]) {
         self.cs.set_high().unwrap();

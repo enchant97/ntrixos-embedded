@@ -109,4 +109,9 @@ where
             .update(delay, self.frame_buffer.data())
             .await;
     }
+
+    /// Force clear the physical display
+    pub async fn clear(&mut self, delay: &mut impl DelayNs) {
+        self.raw_display.clear(delay).await;
+    }
 }

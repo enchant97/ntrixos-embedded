@@ -189,7 +189,7 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
         DISPLAY_PIXEL_BUFFER = display.pixel_buffer_as_mut_ptr();
         DISPLAY_CHAR_BUFFER = display.char_buffer_as_mut_ptr();
     }
-    display.flush(&mut delay).await;
+    display.clear(&mut delay).await;
 
     defmt::debug!("signal core1 to launch shell process");
     APP_LAUNCH_SIG.signal(get_shell_app_entry());
