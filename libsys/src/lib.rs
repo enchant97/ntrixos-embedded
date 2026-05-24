@@ -8,7 +8,7 @@ pub mod keyboard;
 pub mod mem;
 pub mod process;
 
-pub use libsys_macros::entrypoint;
+pub use libsys_macros::{char_cells, entrypoint};
 /// Re-Export of SDK
 pub use sdk;
 

@@ -4,7 +4,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Error, ItemFn, ReturnType, parse_macro_input};
+use syn::{Error, ItemFn, LitStr, ReturnType, parse_macro_input};
 
 /// Entry point for app.
 ///
@@ -87,6 +87,37 @@ pub fn entrypoint(args: TokenStream, item: TokenStream) -> TokenStream {
             ::libsys::core::sys_init(abi);
             #user_fn_ident();
             ::libsys::sdk::ExitCode::Ok
+        }
+    }
+    .into()
+}
+
+/// Convert rust string into a valid `CharCell` buffer.
+///
+/// # Example Usage
+///
+/// ```rs,editable
+/// use libsys::char_cells;
+/// let msg = char_cells!("Hello World");
+/// ```
+#[proc_macro]
+pub fn char_cells(input: TokenStream) -> TokenStream {
+    let s = syn::parse_macro_input!(input as LitStr);
+    let s_value = s.value();
+    if !s_value.is_ascii() {
+        return Error::new(s.span(), "string contains non-ASCII characters")
+            .to_compile_error()
+            .into();
+    }
+    let bytes = s_value.into_bytes();
+    let len = bytes.len();
+    let byte_vals = bytes
+        .iter()
+        .map(|b| quote! { ::libsys::sdk::drivers::display::CharCell::from_u8_lossy(#b) });
+    quote! {
+        {
+            let arr: [::libsys::sdk::drivers::display::CharCell; #len] = [#(#byte_vals),*];
+            arr
         }
     }
     .into()
