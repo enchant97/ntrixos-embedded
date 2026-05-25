@@ -109,12 +109,21 @@ impl Write for DisplayRaw {
 }
 
 pub trait CharWriter: Write {
+    /// Attempts to write the entire cell into this writer.
+    ///
+    /// Calls `write_all()`.
+    #[inline(always)]
+    fn write_cell(&mut self, cell: &CharCell) -> nostd::io::Result<()> {
+        self.write_all(cell.as_bytes())
+    }
+
     /// Attempts to write the entire collection of cells into this writer.
     ///
-    /// Follows the same implementation as `write_all()`.
+    /// Continuously calls `write_cell()` until there is no more data, or error.
+    #[inline]
     fn write_all_cells(&mut self, cells: &[CharCell]) -> nostd::io::Result<()> {
         for cell in cells {
-            self.write_all(cell.as_bytes())?;
+            self.write_cell(cell)?;
         }
         Ok(())
     }
