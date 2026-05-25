@@ -2,10 +2,11 @@
 #![no_main]
 
 use libsys::{
+    char_cells,
+    display::CharWriter,
     entrypoint,
-    nostd::io::Write,
     sdk::drivers::{
-        display::DisplayMode,
+        display::{CharCell, DisplayMode},
         keyboard::{Action, KeyEvent, KeyKind},
     },
 };
@@ -16,8 +17,8 @@ fn main() {
         d.set_display_mode(DisplayMode::Character)
             .expect("failed to set mode");
         d.with_buffer_flushed(|mut fb| {
-            let msg = b"Hello World!";
-            fb.write_all(msg).unwrap();
+            let msg = char_cells!("Hello World!");
+            fb.write_all_cells(&msg).unwrap();
         });
     });
 
@@ -28,9 +29,11 @@ fn main() {
                 key_event = kb.read_key_blocking().unwrap();
                 if key_event.action == Action::Press && key_event.kind == KeyKind::Char {
                     d.with_buffer_flushed(|mut fb| {
-                        let msg = format_args!("Key Pressed = {}", char::from(key_event.code));
+                        let msg = char_cells!("Key Pressed = ");
+                        let pressed_char = CharCell::from_u8_lossy(key_event.code);
                         fb.fill(0);
-                        fb.write_fmt(msg).unwrap();
+                        fb.write_all_cells(&msg).unwrap();
+                        fb.write_all_cells(&[pressed_char]).unwrap();
                     });
                 } else if key_event.code == 0x29 {
                     break;

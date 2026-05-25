@@ -7,7 +7,7 @@ use core::{
 };
 use embassy_sync::blocking_mutex::{Mutex, raw::ThreadModeRawMutex};
 use nostd::io::Write;
-use sdk::drivers::display::{DisplayMode, DisplayOperation, DisplayStat};
+use sdk::drivers::display::{CharCell, DisplayMode, DisplayOperation, DisplayStat};
 use sdk::{ExitCode, FileDescriptor};
 
 pub struct DisplayRaw {
@@ -63,11 +63,13 @@ impl DisplayRaw {
         let mode = self.get_display_mode().unwrap();
         let stat = self.get_display_stat().unwrap();
         let buffer_size = match mode {
-            DisplayMode::Pixel => (stat.pixel_width / 8) * stat.pixel_height,
-            DisplayMode::Character => stat.char_rows * stat.char_cols,
+            DisplayMode::Pixel => (stat.pixel_width.div_ceil(8) * stat.pixel_height) as usize,
+            DisplayMode::Character => {
+                (stat.char_rows * stat.char_cols) as usize * size_of::<CharCell>()
+            }
         };
         FileDesc::from_fd(FileDescriptor::Display)
-            .mmap(buffer_size as usize)
+            .mmap(buffer_size)
             .unwrap()
     }
 
@@ -105,3 +107,17 @@ impl Write for DisplayRaw {
         Ok(())
     }
 }
+
+pub trait CharWriter: Write {
+    /// Attempts to write the entire collection of cells into this writer.
+    ///
+    /// Follows the same implementation as `write_all()`.
+    fn write_all_cells(&mut self, cells: &[CharCell]) -> nostd::io::Result<()> {
+        for cell in cells {
+            self.write_all(cell.as_bytes())?;
+        }
+        Ok(())
+    }
+}
+
+impl<DisplayRaw: Write> CharWriter for DisplayRaw {}

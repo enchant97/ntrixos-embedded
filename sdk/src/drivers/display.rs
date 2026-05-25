@@ -30,7 +30,7 @@ pub struct DisplayStat {
 }
 
 bitflags! {
-    #[derive(Default)]
+    #[derive(Default, bytemuck::Pod, bytemuck::Zeroable)]
 #[cfg_attr(not(feature = "defmt"), derive(Debug, Clone, Copy, PartialEq, Eq))]
     #[repr(transparent)]
     pub struct CharAttributes: u8 {
@@ -46,9 +46,9 @@ impl CharAttributes {
 }
 
 #[repr(C)]
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[non_exhaustive]
 pub struct CharCell {
-    _private: (),
     pub glyph: u8,
     pub attrs: CharAttributes,
 }
@@ -57,7 +57,6 @@ impl CharCell {
     /// Convert from a u8 glyph, replacing with '?' on when out of ASCII range
     pub const fn from_u8_lossy(glyph: u8) -> Self {
         Self {
-            _private: (),
             glyph: if glyph.is_ascii() { glyph } else { b'?' },
             attrs: CharAttributes::empty(),
         }
@@ -71,10 +70,21 @@ impl TryFrom<u8> for CharCell {
             Err(())
         } else {
             Ok(Self {
-                _private: (),
                 glyph,
                 attrs: CharAttributes::empty(),
             })
         }
+    }
+}
+
+impl<'a> From<&'a CharCell> for &'a [u8; 2] {
+    fn from(value: &'a CharCell) -> Self {
+        bytemuck::cast_ref(value)
+    }
+}
+
+impl CharCell {
+    pub fn as_bytes(&self) -> &[u8; 2] {
+        bytemuck::cast_ref(self)
     }
 }

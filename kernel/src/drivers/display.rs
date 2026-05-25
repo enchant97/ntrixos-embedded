@@ -18,7 +18,7 @@ use embedded_hal_async::{delay::DelayNs, spi::SpiBus};
 mod st7920;
 
 use ibm437::IBM437_8X8_REGULAR;
-use sdk::drivers::display::DisplayStat;
+use sdk::drivers::display::{CharCell, DisplayStat};
 pub use st7920::ST7920;
 
 use crate::drivers::display::st7920::{HEIGHT, WIDTH};
@@ -45,7 +45,7 @@ pub struct DisplayDriver<SPI, CS> {
         HEIGHT,
         { buffer_size::<BinaryColor>(WIDTH, HEIGHT) },
     >,
-    char_buffer: [u8; CHAR_BUFFER_SIZE],
+    char_buffer: [CharCell; CHAR_BUFFER_SIZE],
 }
 
 impl<SPI, CS> DisplayDriver<SPI, CS>
@@ -73,7 +73,7 @@ where
         Self {
             raw_display,
             frame_buffer: Framebuffer::new(),
-            char_buffer: [0; CHAR_BUFFER_SIZE],
+            char_buffer: [CharCell::from_u8_lossy(0); CHAR_BUFFER_SIZE],
         }
     }
 
@@ -82,7 +82,7 @@ where
     }
 
     pub unsafe fn char_buffer_as_mut_ptr(&mut self) -> *mut u8 {
-        self.char_buffer.as_mut_ptr()
+        self.char_buffer.as_mut_ptr() as *mut u8
     }
 
     /// Render the character buffer onto the pixel buffer
@@ -92,10 +92,19 @@ where
         text_style.set_background_color(Some(BinaryColor::Off));
         // draw line-by-line
         let mut point = Point::new(0, font.character_size.height as i32);
+        let mut current_glyphs = [0u8; CHAR_COLS];
         for line_i in 0..self.char_rows() {
-            let line =
+            let cells =
                 &self.char_buffer[line_i * self.char_columns()..(line_i + 1) * self.char_columns()];
-            let text_line = str::from_utf8(line).unwrap().trim_end_matches("\0");
+            for (i, glyph) in current_glyphs.iter_mut().enumerate() {
+                *glyph = match cells[i].glyph {
+                    0 => b' ', // replace null ASCII with white-space
+                    v => v,
+                };
+            }
+            // unchecked usage OK, since CharCell already checks
+            let text_line = unsafe { str::from_utf8_unchecked(&current_glyphs) };
+            // TODO style each character using the CharCell attributes
             Text::with_alignment(text_line, point, text_style, Alignment::Left)
                 .draw(&mut self.frame_buffer)
                 .unwrap();
