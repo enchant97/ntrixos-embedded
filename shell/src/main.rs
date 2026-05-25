@@ -7,7 +7,7 @@ use libsys::{
     entrypoint,
     process::exit,
     sdk::drivers::{
-        display::{CharCell, DisplayMode},
+        display::{CharAttributes, CharCell, DisplayMode},
         keyboard::{Action, KeyEvent, KeyKind},
     },
 };
@@ -32,7 +32,8 @@ fn main() {
                 if key_event.action == Action::Press && key_event.kind == KeyKind::Char {
                     d.with_buffer_flushed(|mut fb| {
                         let msg = char_cells!("Key Pressed = ");
-                        let pressed_char = CharCell::from_u8_lossy(key_event.code);
+                        let mut pressed_char = CharCell::from_u8_lossy(key_event.code);
+                        pressed_char.attrs.insert(CharAttributes::INVERT);
                         fb.fill(0);
                         fb.write_all_cells(&msg).unwrap();
                         fb.write_all_cells(&[pressed_char]).unwrap();

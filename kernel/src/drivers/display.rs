@@ -2,15 +2,12 @@ use embedded_graphics::{
     Drawable,
     framebuffer::{Framebuffer, buffer_size},
     geometry::{Point, Size},
-    mono_font::MonoTextStyle,
+    mono_font::MonoTextStyleBuilder,
     pixelcolor::{
         BinaryColor,
         raw::{LittleEndian, RawU1},
     },
-    text::{
-        Alignment, Text,
-        renderer::{CharacterStyle, TextRenderer},
-    },
+    text::{Alignment, Text, renderer::TextRenderer},
 };
 use embedded_hal::digital::OutputPin;
 use embedded_hal_async::{delay::DelayNs, spi::SpiBus};
@@ -88,8 +85,6 @@ where
     /// Render the character buffer onto the pixel buffer
     pub fn render_chars(&mut self) {
         let font = IBM437_8X8_REGULAR;
-        let mut text_style = MonoTextStyle::new(&font, BinaryColor::On);
-        text_style.set_background_color(Some(BinaryColor::Off));
         // draw line-by-line
         let mut point = Point::new(0, font.character_size.height as i32);
         let mut current_glyphs = [0u8; CHAR_COLS];
@@ -102,13 +97,40 @@ where
                     v => v,
                 };
             }
-            // unchecked usage OK, since CharCell already checks
-            let text_line = unsafe { str::from_utf8_unchecked(&current_glyphs) };
-            // TODO style each character using the CharCell attributes
-            Text::with_alignment(text_line, point, text_style, Alignment::Left)
-                .draw(&mut self.frame_buffer)
-                .unwrap();
-            point += Size::new(0, text_style.line_height());
+            let default_text_style = MonoTextStyleBuilder::new()
+                .text_color(BinaryColor::On)
+                .background_color(BinaryColor::Off)
+                .font(&font)
+                .build();
+            let mut char_point = point;
+            for cell in cells {
+                let text_style = if cell.attrs.is_empty() {
+                    default_text_style
+                } else {
+                    let mut custom_style = MonoTextStyleBuilder::new().font(&font);
+                    let fg_color = if cell.attrs.contains_invert() {
+                        BinaryColor::Off
+                    } else {
+                        BinaryColor::On
+                    };
+                    custom_style = custom_style
+                        .text_color(fg_color)
+                        .background_color(fg_color.invert());
+                    if cell.attrs.contains_underline() {
+                        custom_style = custom_style.underline()
+                    }
+                    if cell.attrs.contains_strikethrough() {
+                        custom_style = custom_style.strikethrough();
+                    }
+                    custom_style.build()
+                };
+                char_point =
+                    Text::with_alignment(cell.as_str(), char_point, text_style, Alignment::Left)
+                        .draw(&mut self.frame_buffer)
+                        .unwrap();
+            }
+            // move down a line
+            point += Size::new(0, default_text_style.line_height());
         }
     }
 

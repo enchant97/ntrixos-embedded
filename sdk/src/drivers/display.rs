@@ -35,13 +35,25 @@ bitflags! {
     #[repr(transparent)]
     pub struct CharAttributes: u8 {
         const INVERT = 1;
+        const UNDERLINE = 2;
+        const STRIKE = 3;
     }
 }
 
 impl CharAttributes {
     /// Whether to invert the visuals of the cell.
-    pub fn invert(&self) -> bool {
+    pub const fn contains_invert(&self) -> bool {
         self.contains(CharAttributes::INVERT)
+    }
+
+    /// Whether the apply an underline to the cell
+    pub const fn contains_underline(&self) -> bool {
+        self.contains(CharAttributes::UNDERLINE)
+    }
+
+    /// Whether the apply a strikethrough to the cell
+    pub const fn contains_strikethrough(&self) -> bool {
+        self.contains(CharAttributes::STRIKE)
     }
 }
 
@@ -86,5 +98,9 @@ impl<'a> From<&'a CharCell> for &'a [u8; 2] {
 impl CharCell {
     pub fn as_bytes(&self) -> &[u8; 2] {
         bytemuck::cast_ref(self)
+    }
+
+    pub fn as_str(&self) -> &str {
+        unsafe { core::str::from_utf8_unchecked(core::slice::from_ref(&self.glyph)) }
     }
 }
