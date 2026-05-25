@@ -5,6 +5,7 @@
 use assign_resources::assign_resources;
 use core::ffi::c_void;
 use core::ptr::{addr_of_mut, null_mut};
+use core::sync::atomic::Ordering;
 use embassy_executor::Executor;
 use embassy_futures::join::join;
 use embassy_rp::peripherals::USB;
@@ -18,6 +19,7 @@ use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
 use embassy_time::Delay;
+use portable_atomic::AtomicU32;
 use sdk::drivers::display::{DisplayMode, DisplayOperation, DisplayStat};
 use sdk::{ExitCode, FileDescriptor, KernelAbi};
 use static_cell::StaticCell;
@@ -47,6 +49,8 @@ pub static KERNEL_ABI: KernelAbi = KernelAbi {
     ioctl: abi_ioctl,
 };
 
+/// Used to get back to the app supervisor to launch/relaunch app.
+static APP_SUPERVISOR_SP: AtomicU32 = AtomicU32::new(0);
 /// Used to signal that the current app has finished.
 pub static APP_EXIT_SIG: Signal<CriticalSectionRawMutex, ExitCode> = Signal::new();
 /// Used to signal which app to launch.
@@ -86,7 +90,22 @@ extern "C" fn abi_get_version() -> u32 {
 }
 
 extern "C" fn abi_exit(code: ExitCode) -> ! {
-    todo!()
+    APP_EXIT_SIG.signal(code);
+    if !APP_LAUNCH_SIG.signaled() {
+        // TODO this should be a kernel task
+        // TODO memory is not reset
+        APP_LAUNCH_SIG.signal(get_shell_app_entry());
+    }
+    let sp = APP_SUPERVISOR_SP.load(Ordering::Acquire);
+    unsafe {
+        core::arch::asm!(
+        "mov sp, {sp}",
+        "bx {resume}",
+        sp=in(reg) sp,
+        resume = in(reg) user_process_supervisor as u32 | 1,
+        options(noreturn)
+        );
+    }
 }
 
 extern "C" fn abi_malloc(size: usize) -> *mut u8 {
@@ -261,13 +280,19 @@ async fn usb_entry(r: UsbResources) {
 /// main task loop for handling user processes.
 ///
 /// Should be called once on core1, will block indefinitely.
-fn user_process_supervisor(abi: *const KernelAbi) -> ! {
-    #[allow(clippy::never_loop)]
+fn user_process_supervisor() -> ! {
+    let sp: u32;
+    unsafe {
+        core::arch::asm!("mov {sp}, sp", sp = out(reg) sp,);
+    }
+    APP_SUPERVISOR_SP.store(sp, Ordering::Release);
+
+    defmt::debug!("starting user process supervisor");
     loop {
         if let Some(app_entry) = APP_LAUNCH_SIG.try_take() {
             defmt::debug!("core1 received new app entry, launching...");
             APP_EXIT_SIG.reset();
-            let exit_code = app_entry(abi);
+            let exit_code = app_entry(&KERNEL_ABI as *const KernelAbi);
             defmt::info!(
                 "core1 process finished, got exit code '{}'",
                 exit_code as u8
@@ -288,7 +313,7 @@ fn main() -> ! {
         p.CORE1,
         // TODO replace addr_of_mut with newer implementation
         unsafe { &mut *addr_of_mut!(APP_STACK) },
-        move || user_process_supervisor(&KERNEL_ABI as *const KernelAbi),
+        move || user_process_supervisor(),
     );
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| spawner.spawn(core0_task(r).unwrap()))

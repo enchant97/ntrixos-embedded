@@ -5,6 +5,7 @@ use libsys::{
     char_cells,
     display::CharWriter,
     entrypoint,
+    process::exit,
     sdk::drivers::{
         display::{CharCell, DisplayMode},
         keyboard::{Action, KeyEvent, KeyKind},
@@ -17,6 +18,7 @@ fn main() {
         d.set_display_mode(DisplayMode::Character)
             .expect("failed to set mode");
         d.with_buffer_flushed(|mut fb| {
+            fb.fill(0);
             let msg = char_cells!("Hello World!");
             fb.write_all_cells(&msg).unwrap();
         });
@@ -36,7 +38,7 @@ fn main() {
                         fb.write_all_cells(&[pressed_char]).unwrap();
                     });
                 } else if key_event.code == 0x29 {
-                    break;
+                    exit(libsys::sdk::ExitCode::Ok);
                 }
             }
         });
