@@ -39,8 +39,6 @@ static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 pub static KERNEL_ABI: KernelAbi = KernelAbi {
     get_version: abi_get_version,
     exit: abi_exit,
-    malloc: abi_malloc,
-    free: abi_free,
     write: abi_write,
     read: abi_read,
     flush: abi_flush,
@@ -106,14 +104,6 @@ extern "C" fn abi_exit(code: ExitCode) -> ! {
         options(noreturn)
         );
     }
-}
-
-extern "C" fn abi_malloc(size: usize) -> *mut u8 {
-    todo!()
-}
-
-extern "C" fn abi_free(ptr: *mut u8) {
-    todo!()
 }
 
 extern "C" fn abi_write(fd: FileDescriptor, buff: *const u8, buff_len: usize) {

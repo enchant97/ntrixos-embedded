@@ -25,10 +25,6 @@ pub enum FileDescriptor {
 pub struct KernelAbi {
     pub get_version: extern "C" fn() -> u32,
     pub exit: extern "C" fn(ExitCode) -> !,
-    /// Memory allocation request
-    pub malloc: extern "C" fn(size: usize) -> *mut u8,
-    /// Memory removal request, pointer must have been previously returned from `malloc()`.
-    pub free: extern "C" fn(ptr: *mut u8),
     /// Write directly to the given file descriptor.
     pub write: extern "C" fn(fd: FileDescriptor, buff: *const u8, buff_len: usize),
     /// Read directly from given file descriptor.
