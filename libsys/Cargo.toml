@@ -8,3 +8,4 @@ libsys-macros = { path = "../libsys-macros" }
 sdk = { path = "../sdk" }
 nostd = { version = "0.1", default-features = false, features = [ "io" ] }
 embassy-sync = "0.8"
+bytemuck = { version = "1.25" }

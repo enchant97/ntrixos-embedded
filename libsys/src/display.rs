@@ -1,4 +1,5 @@
 use crate::fd::FileDesc;
+use bytemuck::cast_slice_mut;
 use core::{
     cell::{RefCell, RefMut},
     ffi::c_void,
@@ -83,6 +84,29 @@ impl DisplayRaw {
     #[inline]
     pub fn with_buffer_flushed(&mut self, op: impl FnOnce(&mut [u8])) {
         self.with_buffer(op);
+        self.flush().expect("failed to flush");
+    }
+
+    /// Get a mutable buffer for character mode.
+    ///
+    /// Assumes display is in character mode
+    pub fn with_charcell_buffer(&mut self, op: impl FnOnce(&mut [CharCell])) {
+        // XXX assumes in character mode
+        let stat = self.get_display_stat().unwrap();
+        let buffer_size = (stat.char_rows * stat.char_cols) as usize * size_of::<CharCell>();
+        let buff = FileDesc::from_fd(FileDescriptor::Display)
+            .mmap(buffer_size)
+            .unwrap();
+        op(cast_slice_mut(buff))
+    }
+
+    /// Get a mutable buffer for character mode,
+    /// flushing once operation is complete.
+    ///
+    /// Assumes display is in character mode
+    #[inline]
+    pub fn with_charcell_buffer_flushed(&mut self, op: impl FnOnce(&mut [CharCell])) {
+        self.with_charcell_buffer(op);
         self.flush().expect("failed to flush");
     }
 }
