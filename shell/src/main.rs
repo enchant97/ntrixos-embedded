@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use heapless::String;
+use heapless::Vec;
 use libsys::{
     char_cells,
     display::DisplayRaw,
@@ -20,7 +20,7 @@ const PROMPT_WRAP_PREFIX: PromptPrefx = char_cells!("->");
 struct ShellScreen<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usize> {
     current_row: usize,
     display: &'a mut DisplayRaw,
-    prompt_buffer: String<PROMPT_BUFFER>,
+    prompt_buffer: Vec<u8, PROMPT_BUFFER>,
     prompt_start_row: Option<usize>,
 }
 
@@ -34,7 +34,7 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
         let mut shell = Self {
             current_row: 0,
             display,
-            prompt_buffer: String::new(),
+            prompt_buffer: Vec::new(),
             prompt_start_row: None,
         };
         shell.clear();
@@ -79,8 +79,8 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
         });
     }
 
-    pub fn feed_prompt(&mut self, char: &str) -> Result<(), heapless::CapacityError> {
-        self.prompt_buffer.push_str(char)?;
+    pub fn feed_prompt(&mut self, glyph: u8) -> Result<(), u8> {
+        self.prompt_buffer.push(glyph)?;
         self.display.with_charcell_buffer_flushed(|fb| {
             Self::redraw_prompt(
                 fb,
@@ -109,7 +109,7 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
         }
     }
 
-    pub fn end_prompt(&mut self) -> String<PROMPT_BUFFER> {
+    pub fn end_prompt(&mut self) -> Vec<u8, PROMPT_BUFFER> {
         let out = self.prompt_buffer.clone();
         self.prompt_buffer.clear();
         self.prompt_start_row = None;
@@ -203,7 +203,7 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
         wrap_prefix: &[CharCell],
         current_row: &mut usize,
         prompt_start_row: &mut Option<usize>,
-        prompt_buffer: &str,
+        prompt_buffer: &[u8],
     ) {
         let usable = MAX_COLS - prefix.len();
         let num_chunks = prompt_buffer.len().div_ceil(usable).max(1);
@@ -223,9 +223,8 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
                 fb[Self::row_start(*current_row) + col] = *ch;
                 col += 1;
             }
-            for ch in prompt_buffer[text_start..(text_start + usable).min(prompt_buffer.len())]
-                .as_bytes()
-                .iter()
+            for ch in
+                prompt_buffer[text_start..(text_start + usable).min(prompt_buffer.len())].iter()
             {
                 fb[Self::row_start(*current_row) + col] = CharCell::from_u8_lossy(*ch);
                 col += 1;
@@ -265,10 +264,7 @@ fn main() {
             loop {
                 let key_event = kb.read_key_blocking().unwrap();
                 if key_event.action == Action::Press && key_event.kind == KeyKind::Char {
-                    unsafe {
-                        let _ = shell_screen
-                            .feed_prompt(core::str::from_utf8_unchecked(&[key_event.code]));
-                    }
+                    let _ = shell_screen.feed_prompt(key_event.code);
                 } else if key_event.action == Action::Press && key_event.code == 0x2a {
                     shell_screen.feed_prompt_backspace();
                 } else if key_event.action == Action::Press && key_event.code == 0x28 {
