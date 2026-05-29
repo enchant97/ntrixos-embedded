@@ -277,6 +277,10 @@ fn user_process_supervisor() -> ! {
     }
     APP_SUPERVISOR_SP.store(sp, Ordering::Release);
 
+    if let Some(exit_code) = APP_EXIT_SIG.try_take() {
+        defmt::debug!("core1 process exit early with code '{}'", exit_code as u8);
+    }
+
     defmt::debug!("starting user process supervisor");
     loop {
         if let Some(app_entry) = APP_LAUNCH_SIG.try_take() {
