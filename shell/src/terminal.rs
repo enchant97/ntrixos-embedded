@@ -2,18 +2,58 @@ use heapless::Vec;
 use libsys::{
     char_cells,
     display::DisplayRaw,
-    sdk::drivers::display::{CharCell, DisplayMode},
+    sdk::drivers::display::{CharAttributes, CharCell, DisplayMode},
 };
 
 type PromptPrefx = [CharCell; 2];
 const PROMPT_PREFIX: PromptPrefx = char_cells!("?>");
 const PROMPT_WRAP_PREFIX: PromptPrefx = char_cells!("->");
 
+pub struct TerminalCursor {
+    pos: usize,
+    enable: bool,
+}
+
+impl TerminalCursor {
+    pub const fn new() -> Self {
+        Self {
+            pos: 0,
+            enable: true,
+        }
+    }
+
+    pub const fn enable(&mut self) {
+        self.pos = 0;
+        self.enable = true;
+    }
+
+    pub const fn disable(&mut self) {
+        self.enable = false;
+    }
+
+    pub const fn move_right(&mut self, v: usize) {
+        self.pos = self.pos.saturating_add(v);
+    }
+
+    pub const fn move_left(&mut self, v: usize) {
+        self.pos = self.pos.saturating_sub(v);
+    }
+
+    pub const fn pos(&self) -> usize {
+        self.pos
+    }
+
+    pub const fn enabled(&self) -> bool {
+        self.enable
+    }
+}
+
 pub struct Terminal<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usize> {
     current_row: usize,
     display: &'a mut DisplayRaw,
     prompt_buffer: Vec<u8, PROMPT_BUFFER>,
     prompt_start_row: Option<usize>,
+    prompt_cursor: TerminalCursor,
 }
 
 impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usize>
@@ -28,6 +68,7 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
             display,
             prompt_buffer: Vec::new(),
             prompt_start_row: None,
+            prompt_cursor: TerminalCursor::new(),
         };
         term.clear();
         term
@@ -58,6 +99,7 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
 
     pub fn start_prompt(&mut self) {
         self.prompt_buffer.clear();
+        self.prompt_cursor.enable();
         self.prompt_start_row = Some(self.current_row);
         self.display.with_charcell_buffer_flushed(|fb| {
             Self::redraw_prompt(
@@ -66,6 +108,7 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
                 &PROMPT_WRAP_PREFIX,
                 &mut self.current_row,
                 &mut self.prompt_start_row,
+                &self.prompt_cursor,
                 &self.prompt_buffer,
             );
         });
@@ -73,6 +116,7 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
 
     pub fn feed_prompt(&mut self, glyph: u8) -> Result<(), u8> {
         self.prompt_buffer.push(glyph)?;
+        self.prompt_cursor.move_right(1);
         self.display.with_charcell_buffer_flushed(|fb| {
             Self::redraw_prompt(
                 fb,
@@ -80,6 +124,7 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
                 &PROMPT_WRAP_PREFIX,
                 &mut self.current_row,
                 &mut self.prompt_start_row,
+                &self.prompt_cursor,
                 &self.prompt_buffer,
             );
         });
@@ -88,6 +133,7 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
 
     pub fn feed_prompt_backspace(&mut self) {
         if self.prompt_buffer.pop().is_some() {
+            self.prompt_cursor.move_left(1);
             self.display.with_charcell_buffer_flushed(|fb| {
                 Self::redraw_prompt(
                     fb,
@@ -95,6 +141,7 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
                     &PROMPT_WRAP_PREFIX,
                     &mut self.current_row,
                     &mut self.prompt_start_row,
+                    &self.prompt_cursor,
                     &self.prompt_buffer,
                 );
             });
@@ -102,6 +149,18 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
     }
 
     pub fn end_prompt(&mut self) -> Vec<u8, PROMPT_BUFFER> {
+        self.prompt_cursor.disable();
+        self.display.with_charcell_buffer_flushed(|fb| {
+            Self::redraw_prompt(
+                fb,
+                &PROMPT_PREFIX,
+                &PROMPT_WRAP_PREFIX,
+                &mut self.current_row,
+                &mut self.prompt_start_row,
+                &self.prompt_cursor,
+                &self.prompt_buffer,
+            );
+        });
         let out = self.prompt_buffer.clone();
         self.prompt_buffer.clear();
         self.prompt_start_row = None;
@@ -195,10 +254,12 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
         wrap_prefix: &[CharCell],
         current_row: &mut usize,
         prompt_start_row: &mut Option<usize>,
+        prompt_cursor: &TerminalCursor,
         prompt_buffer: &[u8],
     ) {
         let usable = MAX_COLS - prefix.len();
-        let num_chunks = prompt_buffer.len().div_ceil(usable).max(1);
+        // +1 to allocate enough space for the cursor
+        let num_chunks = (prompt_buffer.len() + 1).div_ceil(usable).max(1);
 
         // shift until there's room for all chunks
         while prompt_start_row.unwrap() + num_chunks > MAX_ROWS {
@@ -224,6 +285,13 @@ impl<'a, const MAX_ROWS: usize, const MAX_COLS: usize, const PROMPT_BUFFER: usiz
             while col < MAX_COLS {
                 fb[Self::row_start(*current_row) + col] = CharCell::from_u8_lossy(b' ');
                 col += 1;
+            }
+            // draw/hide current cursor
+            if (text_start..=text_start + usable).contains(&prompt_cursor.pos()) {
+                let cursor_col = prefix.len() + (prompt_cursor.pos() - text_start);
+                fb[Self::row_start(*current_row) + cursor_col]
+                    .attrs
+                    .set(CharAttributes::INVERT, prompt_cursor.enabled());
             }
             *current_row += 1;
         }
