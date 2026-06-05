@@ -11,7 +11,7 @@ use syn::{Error, ItemFn, LitStr, ReturnType, parse_macro_input};
 /// # Features
 /// - Init memory
 /// - Init ABI (global statics)
-/// - handling clean app exit, returning `ExitCode::OK` exit code
+/// - handling clean app exit, returning `errno::OK` exit code
 ///
 /// # Example Usage
 ///
@@ -80,13 +80,13 @@ pub fn entrypoint(args: TokenStream, item: TokenStream) -> TokenStream {
         #[doc(hidden)]
         #[unsafe(no_mangle)]
         #[unsafe(link_section = ".text._start")]
-        pub extern "C" fn _start(abi: *const ::libsys::sdk::KernelAbi) -> ::libsys::sdk::ExitCode {
+        pub extern "C" fn _start(abi: *const ::libsys::sdk::KernelAbi) -> ::libsys::sdk::errno::ErrNo {
             unsafe {
                 ::libsys::mem::init_memory();
             }
             ::libsys::core::sys_init(abi);
             #user_fn_ident();
-            ::libsys::sdk::ExitCode::Ok
+            ::libsys::sdk::errno::OK
         }
     }
     .into()

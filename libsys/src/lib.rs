@@ -25,10 +25,10 @@ pub mod nostd {
 pub mod panic_system {
     use crate::process::exit;
     use core::panic::PanicInfo;
-    use sdk::ExitCode;
+    use sdk::errno;
 
     #[panic_handler]
     fn panic(_: &PanicInfo) -> ! {
-        exit(ExitCode::GeneralError);
+        exit(errno::GENERAL);
     }
 }

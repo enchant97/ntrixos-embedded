@@ -6,7 +6,10 @@ mod terminal;
 use libsys::{
     char_cells, entrypoint,
     process::exit,
-    sdk::drivers::keyboard::{Action, KeyKind},
+    sdk::{
+        drivers::keyboard::{Action, KeyKind},
+        errno,
+    },
 };
 
 use terminal::Terminal;
@@ -34,7 +37,7 @@ fn main() {
                         term.start_prompt();
                     }
                 } else if key_event.action == Action::Press && key_event.code == 0x29 {
-                    exit(libsys::sdk::ExitCode::Ok);
+                    exit(errno::OK);
                 }
             }
         });

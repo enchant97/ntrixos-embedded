@@ -3,16 +3,7 @@
 use core::ffi::c_void;
 
 pub mod drivers;
-
-/// Used to report the exit code of the program.
-#[repr(C)]
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum ExitCode {
-    /// Success
-    Ok = 0,
-    /// Generic error, use a specific one if available
-    GeneralError = 1,
-}
+pub mod errno;
 
 #[repr(C)]
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -24,7 +15,7 @@ pub enum FileDescriptor {
 #[repr(C)]
 pub struct KernelAbi {
     pub get_version: extern "C" fn() -> u32,
-    pub exit: extern "C" fn(ExitCode) -> !,
+    pub exit: extern "C" fn(isize) -> !,
     /// Write directly to the given file descriptor.
     pub write: extern "C" fn(fd: FileDescriptor, buff: *const u8, buff_len: usize),
     /// Read directly from given file descriptor.
@@ -47,5 +38,5 @@ pub struct KernelAbi {
         op: usize,
         in_arg: *const c_void,
         out_arg: *mut c_void,
-    ) -> ExitCode,
+    ) -> isize,
 }

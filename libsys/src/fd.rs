@@ -1,6 +1,9 @@
 use core::{ffi::c_void, slice::from_raw_parts_mut};
 
-use sdk::{ExitCode, FileDescriptor};
+use sdk::{
+    FileDescriptor,
+    errno::{self, KernelResult},
+};
 
 use crate::core::abi;
 
@@ -18,10 +21,10 @@ impl FileDesc {
         (abi().write)(self.descriptor, buf.as_ptr(), buf.len());
     }
 
-    pub fn read<const N: usize>(&self, buf: &mut [u8; N]) -> Result<usize, ExitCode> {
+    pub fn read<const N: usize>(&self, buf: &mut [u8; N]) -> KernelResult<usize> {
         let out_read = (abi().read)(self.descriptor, buf.as_mut_ptr(), buf.len());
         if out_read < 0 {
-            return Err(ExitCode::GeneralError);
+            return Err(errno::GENERAL);
         }
         Ok(out_read as usize)
     }
@@ -32,10 +35,10 @@ impl FileDesc {
     ///
     /// # Safety
     /// Must provide a valid memory address that matches the size of `buf_len`.
-    pub unsafe fn read_ptr(&self, buf: *mut u8, buf_len: usize) -> Result<usize, ExitCode> {
+    pub unsafe fn read_ptr(&self, buf: *mut u8, buf_len: usize) -> KernelResult<usize> {
         let out_read = (abi().read)(self.descriptor, buf, buf_len);
         if out_read < 0 {
-            return Err(ExitCode::GeneralError);
+            return Err(errno::GENERAL);
         }
         Ok(out_read as usize)
     }
@@ -58,12 +61,8 @@ impl FileDesc {
         op: usize,
         in_arg: *const c_void,
         out_arg: *mut c_void,
-    ) -> Result<(), ExitCode> {
+    ) -> KernelResult<()> {
         let code = (abi().ioctl)(self.descriptor, op, in_arg, out_arg);
-        if code == ExitCode::Ok {
-            Ok(())
-        } else {
-            Err(code)
-        }
+        if code == errno::OK { Ok(()) } else { Err(code) }
     }
 }

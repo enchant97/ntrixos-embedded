@@ -4,7 +4,11 @@ use core::{
 };
 
 use embassy_sync::blocking_mutex::{Mutex, raw::ThreadModeRawMutex};
-use sdk::{ExitCode, FileDescriptor, drivers::keyboard::KeyEvent};
+use sdk::{
+    FileDescriptor,
+    drivers::keyboard::KeyEvent,
+    errno::{self, KernelResult},
+};
 
 use crate::fd::FileDesc;
 
@@ -23,14 +27,14 @@ impl Keyboard {
 }
 
 impl KeyboardRaw {
-    pub fn read_key_blocking(&self) -> Result<KeyEvent, ExitCode> {
+    pub fn read_key_blocking(&self) -> KernelResult<KeyEvent> {
         let mut event = MaybeUninit::<KeyEvent>::uninit();
         let n = unsafe {
             FileDesc::from_fd(FileDescriptor::KeyEvents)
                 .read_ptr(event.as_mut_ptr() as *mut u8, size_of::<KeyEvent>())?
         };
         if n != size_of::<KeyEvent>() {
-            Err(ExitCode::GeneralError)
+            Err(errno::GENERAL)
         } else {
             Ok(unsafe { event.assume_init() })
         }

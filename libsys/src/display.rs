@@ -9,7 +9,7 @@ use core::{
 use embassy_sync::blocking_mutex::{Mutex, raw::ThreadModeRawMutex};
 use nostd::io::Write;
 use sdk::drivers::display::{CharCell, DisplayMode, DisplayOperation, DisplayStat};
-use sdk::{ExitCode, FileDescriptor};
+use sdk::{FileDescriptor, errno::KernelResult};
 
 pub struct DisplayRaw {
     _private: (),
@@ -26,7 +26,7 @@ impl Display {
 }
 
 impl DisplayRaw {
-    pub fn get_display_mode(&self) -> Result<DisplayMode, ExitCode> {
+    pub fn get_display_mode(&self) -> KernelResult<DisplayMode> {
         let mut display_mode = MaybeUninit::uninit();
         FileDesc::from_fd(FileDescriptor::Display)
             .ioctl(
@@ -37,7 +37,7 @@ impl DisplayRaw {
             .map(|()| unsafe { display_mode.assume_init() })
     }
 
-    pub fn set_display_mode(&mut self, display_mode: DisplayMode) -> Result<(), ExitCode> {
+    pub fn set_display_mode(&mut self, display_mode: DisplayMode) -> KernelResult<()> {
         FileDesc::from_fd(FileDescriptor::Display).ioctl(
             match display_mode {
                 DisplayMode::Pixel => DisplayOperation::SetModePixel as usize,
@@ -48,7 +48,7 @@ impl DisplayRaw {
         )
     }
 
-    pub fn get_display_stat(&self) -> Result<DisplayStat, ExitCode> {
+    pub fn get_display_stat(&self) -> KernelResult<DisplayStat> {
         let mut display_stat = MaybeUninit::uninit();
         FileDesc::from_fd(FileDescriptor::Display)
             .ioctl(

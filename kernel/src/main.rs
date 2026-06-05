@@ -21,7 +21,8 @@ use embassy_sync::{
 use embassy_time::Delay;
 use portable_atomic::AtomicU32;
 use sdk::drivers::display::{DisplayMode, DisplayOperation, DisplayStat};
-use sdk::{ExitCode, FileDescriptor, KernelAbi};
+use sdk::errno::{self, ErrNo};
+use sdk::{FileDescriptor, KernelAbi};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -50,7 +51,7 @@ pub static KERNEL_ABI: KernelAbi = KernelAbi {
 /// Used to get back to the app supervisor to launch/relaunch app.
 static APP_SUPERVISOR_SP: AtomicU32 = AtomicU32::new(0);
 /// Used to signal that the current app has finished.
-pub static APP_EXIT_SIG: Signal<CriticalSectionRawMutex, ExitCode> = Signal::new();
+pub static APP_EXIT_SIG: Signal<CriticalSectionRawMutex, ErrNo> = Signal::new();
 /// Used to signal which app to launch.
 pub static APP_LAUNCH_SIG: Signal<CriticalSectionRawMutex, AppEntry> = Signal::new();
 
@@ -87,7 +88,7 @@ extern "C" fn abi_get_version() -> u32 {
     1
 }
 
-extern "C" fn abi_exit(code: ExitCode) -> ! {
+extern "C" fn abi_exit(code: ErrNo) -> ! {
     APP_EXIT_SIG.signal(code);
     if !APP_LAUNCH_SIG.signaled() {
         // TODO this should be a kernel task
@@ -163,7 +164,7 @@ extern "C" fn abi_ioctl(
     op: usize,
     in_arg: *const c_void,
     out_arg: *mut c_void,
-) -> ExitCode {
+) -> ErrNo {
     match fd {
         FileDescriptor::Display => {
             let disp_op = DisplayOperation::try_from(op).unwrap();
@@ -180,7 +181,7 @@ extern "C" fn abi_ioctl(
         }
         _ => todo!(),
     }
-    ExitCode::Ok
+    errno::OK
 }
 
 pub async fn kernel_entry(r: DisplayResources) -> ! {
@@ -278,7 +279,7 @@ fn user_process_supervisor() -> ! {
     APP_SUPERVISOR_SP.store(sp, Ordering::Release);
 
     if let Some(exit_code) = APP_EXIT_SIG.try_take() {
-        defmt::debug!("core1 process exit early with code '{}'", exit_code as u8);
+        defmt::debug!("core1 process exit early with code '{}'", exit_code);
     }
 
     defmt::debug!("starting user process supervisor");
@@ -287,10 +288,7 @@ fn user_process_supervisor() -> ! {
             defmt::debug!("core1 received new app entry, launching...");
             APP_EXIT_SIG.reset();
             let exit_code = app_entry(&KERNEL_ABI as *const KernelAbi);
-            defmt::info!(
-                "core1 process finished, got exit code '{}'",
-                exit_code as u8
-            );
+            defmt::info!("core1 process finished, got exit code '{}'", exit_code);
             APP_EXIT_SIG.signal(exit_code);
             defmt::debug!("parking core1, until new app is launched");
         }
