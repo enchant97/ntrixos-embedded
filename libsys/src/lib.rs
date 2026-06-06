@@ -6,6 +6,7 @@ pub mod fd;
 pub mod keyboard;
 pub mod mem;
 pub mod process;
+pub mod terminal;
 
 pub use libsys_macros::{char_cells, entrypoint};
 /// Re-Export of SDK

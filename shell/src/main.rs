@@ -1,8 +1,6 @@
 #![no_std]
 #![no_main]
 
-mod terminal;
-
 use libsys::{
     char_cells, entrypoint,
     process::exit,
@@ -10,15 +8,14 @@ use libsys::{
         drivers::keyboard::{Action, KeyKind},
         errno,
     },
+    terminal::Terminal,
 };
-
-use terminal::Terminal;
 
 #[entrypoint]
 fn main() {
     libsys::display::display().lock(|d| {
         libsys::keyboard::keyboard().lock(|kb| {
-            let mut term = Terminal::<8, 16, 256>::setup(d);
+            let mut term = Terminal::<256>::setup(d);
             term.feed_output_line(&char_cells!("Welcome,"));
             term.feed_output_line(&char_cells!("To The OS!"));
             term.start_prompt();
@@ -30,7 +27,7 @@ fn main() {
                     term.feed_prompt_backspace();
                 } else if key_event.action == Action::Press && key_event.code == 0x28 {
                     let out = term.end_prompt();
-                    if out.len() == 0 {
+                    if out.is_empty() {
                         term.start_prompt();
                     } else {
                         term.feed_output_line(&char_cells!("Done"));
