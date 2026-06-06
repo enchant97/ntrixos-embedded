@@ -11,6 +11,29 @@ use nostd::io::Write;
 use sdk::drivers::display::{CharCell, DisplayMode, DisplayOperation, DisplayStat};
 use sdk::{FileDescriptor, errno::KernelResult};
 
+pub trait PixelDisplay: Write {
+    /// Get a mutable pixel buffer.
+    fn with_buffer(&mut self, op: impl FnOnce(&mut [u8]));
+    /// Get a mutable pixel buffer and flush once operation is complete.
+    #[inline(always)]
+    fn with_buffer_flushed(&mut self, op: impl FnOnce(&mut [u8])) {
+        self.with_buffer(op);
+        self.flush().expect("failed to flush");
+    }
+}
+
+pub trait CharacterDisplay: Write {
+    /// Get a mutable character buffer.
+    fn with_charcell_buffer(&mut self, op: impl FnOnce(&mut [CharCell]));
+    /// Get a mutable character buffer,
+    /// flushing once operation is complete.
+    #[inline(always)]
+    fn with_charcell_buffer_flushed(&mut self, op: impl FnOnce(&mut [CharCell])) {
+        self.with_charcell_buffer(op);
+        self.flush().expect("failed to flush");
+    }
+}
+
 pub struct DisplayRaw {
     _private: (),
 }
@@ -59,10 +82,8 @@ impl DisplayRaw {
             .map(|()| unsafe { display_stat.assume_init() })
     }
 
-    fn buffer_mut(&mut self) -> &mut [u8] {
-        // PERF getting mode+stat each time is costly
-        let mode = self.get_display_mode().unwrap();
-        let stat = self.get_display_stat().unwrap();
+    unsafe fn buffer_mut(&mut self, mode: DisplayMode, stat: DisplayStat) -> &mut [u8] {
+        // TODO-FUTURE assumes 1 bit per pixel, get from display stat
         let buffer_size = match mode {
             DisplayMode::Pixel => (stat.pixel_width.div_ceil(8) * stat.pixel_height) as usize,
             DisplayMode::Character => {
@@ -73,41 +94,27 @@ impl DisplayRaw {
             .mmap(buffer_size)
             .unwrap()
     }
+}
 
-    /// Get a mutable buffer.
+impl PixelDisplay for DisplayRaw {
     #[inline]
-    pub fn with_buffer(&mut self, op: impl FnOnce(&mut [u8])) {
-        op(self.buffer_mut());
-    }
-
-    /// Get a mutable buffer and flush once operation is complete.
-    #[inline]
-    pub fn with_buffer_flushed(&mut self, op: impl FnOnce(&mut [u8])) {
-        self.with_buffer(op);
-        self.flush().expect("failed to flush");
-    }
-
-    /// Get a mutable buffer for character mode.
-    ///
-    /// Assumes display is in character mode
-    pub fn with_charcell_buffer(&mut self, op: impl FnOnce(&mut [CharCell])) {
-        // XXX assumes in character mode
+    fn with_buffer(&mut self, op: impl FnOnce(&mut [u8])) {
+        self.set_display_mode(DisplayMode::Pixel).unwrap();
+        // PERF stat should be cacheable
         let stat = self.get_display_stat().unwrap();
-        let buffer_size = (stat.char_rows * stat.char_cols) as usize * size_of::<CharCell>();
-        let buff = FileDesc::from_fd(FileDescriptor::Display)
-            .mmap(buffer_size)
-            .unwrap();
-        op(cast_slice_mut(buff))
+        op(unsafe { self.buffer_mut(DisplayMode::Pixel, stat) })
     }
+}
 
-    /// Get a mutable buffer for character mode,
-    /// flushing once operation is complete.
-    ///
-    /// Assumes display is in character mode
+impl CharacterDisplay for DisplayRaw {
     #[inline]
-    pub fn with_charcell_buffer_flushed(&mut self, op: impl FnOnce(&mut [CharCell])) {
-        self.with_charcell_buffer(op);
-        self.flush().expect("failed to flush");
+    fn with_charcell_buffer(&mut self, op: impl FnOnce(&mut [CharCell])) {
+        self.set_display_mode(DisplayMode::Character).unwrap();
+        // PERF stat should be cacheable
+        let stat = self.get_display_stat().unwrap();
+        op(cast_slice_mut(unsafe {
+            self.buffer_mut(DisplayMode::Character, stat)
+        }))
     }
 }
 
@@ -153,4 +160,4 @@ pub trait CharWriter: Write {
     }
 }
 
-impl<DisplayRaw: Write> CharWriter for DisplayRaw {}
+impl<CharacterDisplay: Write> CharWriter for CharacterDisplay {}

@@ -1,7 +1,7 @@
 //! A terminal handler for a display
 #![allow(clippy::too_many_arguments)]
 use crate::{
-    display::DisplayRaw,
+    display::{CharacterDisplay, DisplayRaw, PixelDisplay},
     sdk::drivers::display::{CharAttributes, CharCell, DisplayMode},
 };
 use heapless::Vec;
