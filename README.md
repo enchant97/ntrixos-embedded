@@ -1,11 +1,15 @@
-# The Embedded OS
+# NtrixOS Embedded
 An experimental "from scratch" operating system project aimed at the RP2040/RP235x microcontroller.
 
 ## Goals
-- Fully functional kernel - built on top of the embassy framework
-- Provides a computer experience like the original MS-DOS
-- Ability to load external programs from storage
+- Run on real hardware, no VM/emulation
+- Provide a single user, single process OS
+- Inspired by DOS and other early OS (terminal based)
 - Can a full OS be written in Rust?
+- Ability to load external programs
+- Create kernel on top of embassy framework
+    - Removes the need to write a HAL
+    - Can use pre-built state machine for kernel
 
 ## Structure
 - `kernel` - The Kernel
