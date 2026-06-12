@@ -6,15 +6,17 @@ use assign_resources::assign_resources;
 use core::ffi::c_void;
 use core::ptr::{addr_of_mut, null_mut};
 use core::sync::atomic::Ordering;
+use embassy_embedded_hal::shared_bus::asynch::spi::SpiDeviceWithConfig;
 use embassy_executor::Executor;
 use embassy_futures::join::join;
-use embassy_rp::peripherals::USB;
+use embassy_rp::peripherals::{DMA_CH1, SPI0, USB};
 use embassy_rp::{
     Peri, bind_interrupts, gpio,
     multicore::Stack,
     peripherals::{self, DMA_CH0},
     spi::{self, Spi},
 };
+use embassy_sync::mutex::Mutex;
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
@@ -27,7 +29,7 @@ use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::common::AppEntry;
-use crate::drivers::display::{DISPLAY_STAT, DisplayDriver, ST7920};
+use crate::drivers::display::{CustomDisplay, DISPLAY_STAT, DisplayDriver};
 use crate::memory::get_shell_app_entry;
 
 mod common;
@@ -55,6 +57,8 @@ pub static APP_EXIT_SIG: Signal<CriticalSectionRawMutex, ErrNo> = Signal::new();
 /// Used to signal which app to launch.
 pub static APP_LAUNCH_SIG: Signal<CriticalSectionRawMutex, AppEntry> = Signal::new();
 
+static SPI0_BUS: StaticCell<Mutex<CriticalSectionRawMutex, Spi<SPI0, spi::Async>>> =
+    StaticCell::new();
 static FLUSH_DISPLAY_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static mut DISPLAY_PIXEL_BUFFER: *mut u8 = null_mut();
 static mut DISPLAY_CHAR_BUFFER: *mut u8 = null_mut();
@@ -72,7 +76,9 @@ assign_resources! {
         cs: PIN_17,
         sck: PIN_18,
         mosi: PIN_19,
-        dma: DMA_CH0,
+        miso: PIN_16,
+        dma_rx: DMA_CH0,
+        dma_tx: DMA_CH1,
     },
     usb: UsbResources {
         usb: USB,
@@ -80,7 +86,7 @@ assign_resources! {
 }
 
 bind_interrupts!(struct Irqs{
-    DMA_IRQ_0 => embassy_rp::dma::InterruptHandler<DMA_CH0>;
+    DMA_IRQ_0 => embassy_rp::dma::InterruptHandler<DMA_CH0>, embassy_rp::dma::InterruptHandler<DMA_CH1>;
     USBCTRL_IRQ => embassy_rp::usb::host::InterruptHandler<USB>;
 });
 
@@ -185,13 +191,28 @@ extern "C" fn abi_ioctl(
 }
 
 pub async fn kernel_entry(r: DisplayResources) -> ! {
+    defmt::debug!("main kernel entry");
+
+    let spi0_bus = SPI0_BUS.init_with(|| {
+        Mutex::new(Spi::new(
+            r.spi,
+            r.sck,
+            r.mosi,
+            r.miso,
+            r.dma_tx,
+            r.dma_rx,
+            Irqs,
+            Default::default(),
+        ))
+    });
+
+    defmt::debug!("setting up display");
     let mut display_spi_config = spi::Config::default();
     display_spi_config.polarity = spi::Polarity::IdleLow;
-    display_spi_config.phase = spi::Phase::CaptureOnFirstTransition;
-    display_spi_config.frequency = 600000;
-    let display_spi = Spi::new_txonly(r.spi, r.sck, r.mosi, r.dma, Irqs, display_spi_config);
+    display_spi_config.phase = spi::Phase::CaptureOnSecondTransition;
     let display_spi_cs = gpio::Output::new(r.cs, gpio::Level::Low);
-    let mut raw_display = ST7920::new(display_spi, display_spi_cs, false);
+    let display_spi = SpiDeviceWithConfig::new(spi0_bus, display_spi_cs, display_spi_config);
+    let mut raw_display = CustomDisplay::new(display_spi);
     let mut delay = Delay {};
     raw_display.init(&mut delay).await;
     let mut display = DisplayDriver::new(raw_display);
@@ -200,6 +221,7 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
         DISPLAY_CHAR_BUFFER = display.char_buffer_as_mut_ptr();
     }
     display.clear(&mut delay).await;
+    defmt::debug!("display ready");
 
     defmt::debug!("signal core1 to launch shell process");
     APP_LAUNCH_SIG.signal(get_shell_app_entry());
@@ -215,6 +237,7 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
 }
 
 async fn usb_entry(r: UsbResources) {
+    defmt::debug!("usb entry");
     let driver = embassy_rp::usb::host::Driver::new(r.usb, Irqs);
     static BUS_STATE: embassy_usb_host::BusState = embassy_usb_host::BusState::new();
     let (mut bus_ctrl, bus) = embassy_usb_host::bus(driver, &BUS_STATE);

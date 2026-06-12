@@ -9,16 +9,16 @@ use embedded_graphics::{
     },
     text::{Alignment, Text, renderer::TextRenderer},
 };
-use embedded_hal::digital::OutputPin;
-use embedded_hal_async::{delay::DelayNs, spi::SpiBus};
+use embedded_hal_async::{delay::DelayNs, spi::SpiDevice};
 
-mod st7920;
+mod custom;
 
+pub use custom::CustomDisplay;
 use ibm437::IBM437_8X8_REGULAR;
 use sdk::drivers::display::{CharCell, DisplayStat};
-pub use st7920::ST7920;
+use static_cell::StaticCell;
 
-use crate::drivers::display::st7920::{HEIGHT, WIDTH};
+use crate::drivers::display::custom::{HEIGHT, WIDTH};
 
 pub const PIXEL_HEIGHT: usize = HEIGHT;
 pub const PIXEL_WIDTH: usize = WIDTH;
@@ -32,23 +32,27 @@ pub const DISPLAY_STAT: DisplayStat = DisplayStat {
     char_cols: CHAR_COLS as u32,
 };
 
-pub struct DisplayDriver<SPI, CS> {
-    raw_display: ST7920<SPI, CS>,
-    frame_buffer: Framebuffer<
-        BinaryColor,
-        RawU1,
-        LittleEndian,
-        WIDTH,
-        HEIGHT,
-        { buffer_size::<BinaryColor>(WIDTH, HEIGHT) },
-    >,
-    char_buffer: [CharCell; CHAR_BUFFER_SIZE],
+type DisplayFrameBuffer = Framebuffer<
+    BinaryColor,
+    RawU1,
+    LittleEndian,
+    WIDTH,
+    HEIGHT,
+    { buffer_size::<BinaryColor>(WIDTH, HEIGHT) },
+>;
+
+static PIXEL_BUFFER: StaticCell<DisplayFrameBuffer> = StaticCell::new();
+static CHARACTER_BUFFER: StaticCell<[CharCell; CHAR_BUFFER_SIZE]> = StaticCell::new();
+
+pub struct DisplayDriver<SPI> {
+    raw_display: CustomDisplay<SPI>,
+    frame_buffer: &'static mut DisplayFrameBuffer,
+    char_buffer: &'static mut [CharCell; CHAR_BUFFER_SIZE],
 }
 
-impl<SPI, CS> DisplayDriver<SPI, CS>
+impl<SPI> DisplayDriver<SPI>
 where
-    SPI: SpiBus,
-    CS: OutputPin,
+    SPI: SpiDevice,
 {
     pub const fn pixel_width(&self) -> usize {
         PIXEL_WIDTH
@@ -66,11 +70,12 @@ where
         CHAR_COLS
     }
 
-    pub fn new(raw_display: ST7920<SPI, CS>) -> Self {
+    pub fn new(raw_display: CustomDisplay<SPI>) -> Self {
         Self {
             raw_display,
-            frame_buffer: Framebuffer::new(),
-            char_buffer: [CharCell::from_u8_lossy(0); CHAR_BUFFER_SIZE],
+            frame_buffer: PIXEL_BUFFER.init_with(|| Framebuffer::new()),
+            char_buffer: CHARACTER_BUFFER
+                .init_with(|| [CharCell::from_u8_lossy(0); CHAR_BUFFER_SIZE]),
         }
     }
 
@@ -126,7 +131,7 @@ where
                 };
                 char_point =
                     Text::with_alignment(cell.as_str(), char_point, text_style, Alignment::Left)
-                        .draw(&mut self.frame_buffer)
+                        .draw(self.frame_buffer)
                         .unwrap();
             }
             // move down a line
