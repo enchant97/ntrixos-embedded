@@ -20,10 +20,13 @@ use static_cell::StaticCell;
 
 use crate::drivers::display::custom::{HEIGHT, WIDTH};
 
+static DEFAULT_FONT: MonoFont = IBM437_8X8_REGULAR;
+const DEFAULT_TEXT_STYLE: MonoTextStyle<BinaryColor> = build_text_style(CharAttributes::empty());
+
 pub const PIXEL_HEIGHT: usize = HEIGHT;
 pub const PIXEL_WIDTH: usize = WIDTH;
-pub const CHAR_ROWS: usize = HEIGHT / IBM437_8X8_REGULAR.character_size.height as usize;
-pub const CHAR_COLS: usize = WIDTH / IBM437_8X8_REGULAR.character_size.width as usize;
+pub const CHAR_ROWS: usize = HEIGHT / DEFAULT_FONT.character_size.height as usize;
+pub const CHAR_COLS: usize = WIDTH / DEFAULT_FONT.character_size.width as usize;
 pub const CHAR_BUFFER_SIZE: usize = CHAR_ROWS * CHAR_COLS;
 pub const DISPLAY_STAT: DisplayStat = DisplayStat {
     pixel_width: PIXEL_WIDTH as u32,
@@ -43,8 +46,6 @@ type DisplayFrameBuffer = Framebuffer<
 
 static PIXEL_BUFFER: StaticCell<DisplayFrameBuffer> = StaticCell::new();
 static CHARACTER_BUFFER: StaticCell<[CharCell; CHAR_BUFFER_SIZE]> = StaticCell::new();
-static DEFAULT_FONT: MonoFont = IBM437_8X8_REGULAR;
-const DEFAULT_TEXT_STYLE: MonoTextStyle<BinaryColor> = build_text_style(CharAttributes::empty());
 
 const fn build_text_style<'a>(attrs: CharAttributes) -> MonoTextStyle<'a, BinaryColor> {
     let mut custom_style = MonoTextStyleBuilder::new().font(&DEFAULT_FONT);
