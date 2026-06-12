@@ -5,7 +5,7 @@ unsafe extern "C" {
 }
 
 // HACK there must be a better way to include the shell.
-#[allow(unused)]
+#[used]
 #[unsafe(link_section = ".shell_flash_slot")]
 static SHELL_FLASH: [u8; include_bytes!("../../../target/thumbv6m-none-eabi/bin/shell.bin").len()] =
     *include_bytes!("../../../target/thumbv6m-none-eabi/bin/shell.bin");
