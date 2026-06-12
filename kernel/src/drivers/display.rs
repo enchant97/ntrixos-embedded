@@ -2,7 +2,7 @@ use embedded_graphics::{
     Drawable,
     framebuffer::{Framebuffer, buffer_size},
     geometry::{Point, Size},
-    mono_font::MonoTextStyleBuilder,
+    mono_font::{MonoFont, MonoTextStyle, MonoTextStyleBuilder},
     pixelcolor::{
         BinaryColor,
         raw::{LittleEndian, RawU1},
@@ -15,7 +15,7 @@ mod custom;
 
 pub use custom::CustomDisplay;
 use ibm437::IBM437_8X8_REGULAR;
-use sdk::drivers::display::{CharCell, DisplayStat};
+use sdk::drivers::display::{CharAttributes, CharCell, DisplayStat};
 use static_cell::StaticCell;
 
 use crate::drivers::display::custom::{HEIGHT, WIDTH};
@@ -43,6 +43,27 @@ type DisplayFrameBuffer = Framebuffer<
 
 static PIXEL_BUFFER: StaticCell<DisplayFrameBuffer> = StaticCell::new();
 static CHARACTER_BUFFER: StaticCell<[CharCell; CHAR_BUFFER_SIZE]> = StaticCell::new();
+static DEFAULT_FONT: MonoFont = IBM437_8X8_REGULAR;
+const DEFAULT_TEXT_STYLE: MonoTextStyle<BinaryColor> = build_text_style(CharAttributes::empty());
+
+const fn build_text_style<'a>(attrs: CharAttributes) -> MonoTextStyle<'a, BinaryColor> {
+    let mut custom_style = MonoTextStyleBuilder::new().font(&DEFAULT_FONT);
+    let fg_color = if attrs.contains_invert() {
+        BinaryColor::Off
+    } else {
+        BinaryColor::On
+    };
+    custom_style = custom_style
+        .text_color(fg_color)
+        .background_color(fg_color.invert());
+    if attrs.contains_underline() {
+        custom_style = custom_style.underline()
+    }
+    if attrs.contains_strikethrough() {
+        custom_style = custom_style.strikethrough();
+    }
+    custom_style.build()
+}
 
 pub struct DisplayDriver<SPI> {
     raw_display: CustomDisplay<SPI>,
@@ -89,45 +110,18 @@ where
 
     /// Render the character buffer onto the pixel buffer
     pub fn render_chars(&mut self) {
-        let font = IBM437_8X8_REGULAR;
         // draw line-by-line
-        let mut point = Point::new(0, font.character_size.height as i32);
-        let mut current_glyphs = [0u8; CHAR_COLS];
+        let mut point = Point::new(0, DEFAULT_FONT.character_size.height as i32);
+        let line_height = DEFAULT_TEXT_STYLE.line_height();
         for line_i in 0..self.char_rows() {
             let cells =
                 &self.char_buffer[line_i * self.char_columns()..(line_i + 1) * self.char_columns()];
-            for (i, glyph) in current_glyphs.iter_mut().enumerate() {
-                *glyph = match cells[i].glyph {
-                    0 => b' ', // replace null ASCII with white-space
-                    v => v,
-                };
-            }
-            let default_text_style = MonoTextStyleBuilder::new()
-                .text_color(BinaryColor::On)
-                .background_color(BinaryColor::Off)
-                .font(&font)
-                .build();
             let mut char_point = point;
             for cell in cells {
                 let text_style = if cell.attrs.is_empty() {
-                    default_text_style
+                    DEFAULT_TEXT_STYLE
                 } else {
-                    let mut custom_style = MonoTextStyleBuilder::new().font(&font);
-                    let fg_color = if cell.attrs.contains_invert() {
-                        BinaryColor::Off
-                    } else {
-                        BinaryColor::On
-                    };
-                    custom_style = custom_style
-                        .text_color(fg_color)
-                        .background_color(fg_color.invert());
-                    if cell.attrs.contains_underline() {
-                        custom_style = custom_style.underline()
-                    }
-                    if cell.attrs.contains_strikethrough() {
-                        custom_style = custom_style.strikethrough();
-                    }
-                    custom_style.build()
+                    build_text_style(cell.attrs)
                 };
                 char_point =
                     Text::with_alignment(cell.as_str(), char_point, text_style, Alignment::Left)
@@ -135,7 +129,7 @@ where
                         .unwrap();
             }
             // move down a line
-            point += Size::new(0, default_text_style.line_height());
+            point += Size::new(0, line_height);
         }
     }
 
