@@ -16,8 +16,7 @@ fn main() {
     libsys::display::display().lock(|d| {
         libsys::keyboard::keyboard().lock(|kb| {
             let mut term = Terminal::<256>::setup(d);
-            term.feed_output_line(&char_cells!("Welcome,"));
-            term.feed_output_line(&char_cells!("To The OS!"));
+            term.feed_output_line(&char_cells!("Welcome, To Ntrix OS!"));
             term.start_prompt();
             loop {
                 let key_event = kb.read_key_blocking().unwrap();

@@ -1,7 +1,7 @@
 //! A terminal handler for a display
 #![allow(clippy::too_many_arguments)]
 use crate::{
-    display::{CharacterDisplay, DisplayRaw, PixelDisplay},
+    display::{CharacterDisplay, DisplayRaw},
     sdk::drivers::display::{CharAttributes, CharCell, DisplayMode},
 };
 use heapless::Vec;
@@ -94,8 +94,8 @@ impl<'a, const PROMPT_BUFFER: usize> Terminal<'a, PROMPT_BUFFER> {
         self.current_row = 0;
         self.prompt_buffer.clear();
         self.prompt_start_row = None;
-        self.display.with_buffer_flushed(|fb| {
-            fb.fill(0);
+        self.display.with_charcell_buffer_flushed(|fb| {
+            fb.fill(CharCell::from_u8_lossy(b' '));
         });
     }
 
