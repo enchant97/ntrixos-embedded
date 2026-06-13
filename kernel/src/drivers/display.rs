@@ -1,32 +1,17 @@
-use embedded_graphics::{
-    Drawable,
-    framebuffer::{Framebuffer, buffer_size},
-    geometry::{Point, Size},
-    mono_font::{MonoFont, MonoTextStyle, MonoTextStyleBuilder},
-    pixelcolor::{
-        BinaryColor,
-        raw::{LittleEndian, RawU1},
-    },
-    text::{Alignment, Text, renderer::TextRenderer},
-};
+use crate::drivers::display::custom::BUFFER_SIZE;
+pub use custom::CustomDisplay;
 use embedded_hal_async::{delay::DelayNs, spi::SpiDevice};
+use sdk::drivers::display::{CharCell, DisplayStat};
+use static_cell::StaticCell;
 
 mod custom;
 
-pub use custom::CustomDisplay;
-use ibm437::IBM437_8X8_REGULAR;
-use sdk::drivers::display::{CharAttributes, CharCell, DisplayStat};
-use static_cell::StaticCell;
-
-use crate::drivers::display::custom::{HEIGHT, WIDTH};
-
-static DEFAULT_FONT: MonoFont = IBM437_8X8_REGULAR;
-const DEFAULT_TEXT_STYLE: MonoTextStyle<BinaryColor> = build_text_style(CharAttributes::empty());
-
-pub const PIXEL_HEIGHT: usize = HEIGHT;
-pub const PIXEL_WIDTH: usize = WIDTH;
-pub const CHAR_ROWS: usize = HEIGHT / DEFAULT_FONT.character_size.height as usize;
-pub const CHAR_COLS: usize = WIDTH / DEFAULT_FONT.character_size.width as usize;
+pub const PIXEL_HEIGHT: usize = custom::HEIGHT;
+pub const PIXEL_WIDTH: usize = custom::WIDTH;
+pub const FONT_HEIGHT: usize = 8;
+pub const FONT_WIDTH: usize = 8;
+pub const CHAR_ROWS: usize = PIXEL_HEIGHT / FONT_HEIGHT as usize;
+pub const CHAR_COLS: usize = PIXEL_WIDTH / FONT_WIDTH as usize;
 pub const CHAR_BUFFER_SIZE: usize = CHAR_ROWS * CHAR_COLS;
 pub const DISPLAY_STAT: DisplayStat = DisplayStat {
     pixel_width: PIXEL_WIDTH as u32,
@@ -35,40 +20,30 @@ pub const DISPLAY_STAT: DisplayStat = DisplayStat {
     char_cols: CHAR_COLS as u32,
 };
 
-type DisplayFrameBuffer = Framebuffer<
-    BinaryColor,
-    RawU1,
-    LittleEndian,
-    WIDTH,
-    HEIGHT,
-    { buffer_size::<BinaryColor>(WIDTH, HEIGHT) },
->;
-
-static PIXEL_BUFFER: StaticCell<DisplayFrameBuffer> = StaticCell::new();
+static PIXEL_BUFFER: StaticCell<[u8; BUFFER_SIZE]> = StaticCell::new();
 static CHARACTER_BUFFER: StaticCell<[CharCell; CHAR_BUFFER_SIZE]> = StaticCell::new();
 
-const fn build_text_style<'a>(attrs: CharAttributes) -> MonoTextStyle<'a, BinaryColor> {
-    let mut custom_style = MonoTextStyleBuilder::new().font(&DEFAULT_FONT);
-    let fg_color = if attrs.contains_invert() {
-        BinaryColor::Off
-    } else {
-        BinaryColor::On
-    };
-    custom_style = custom_style
-        .text_color(fg_color)
-        .background_color(fg_color.invert());
-    if attrs.contains_underline() {
-        custom_style = custom_style.underline()
+fn render_char_cell(fb: &mut [u8], col: usize, row: usize, cell: &CharCell) {
+    const FB_STRIDE: usize = (CHAR_COLS * FONT_WIDTH) / 8;
+    const SHEET_STRIDE: usize = ibm437::CHARS_PER_ROW;
+    let offset = cell.glyph as usize;
+    let glyph_col = offset % ibm437::CHARS_PER_ROW;
+    let glyph_row = offset / ibm437::CHARS_PER_ROW;
+    for y in 0..FONT_HEIGHT {
+        let sheet_byte = ibm437::IBM437_8X8_REGULAR_DATA
+            [(glyph_row * FONT_WIDTH + y) * SHEET_STRIDE + glyph_col];
+        let byte = if cell.attrs.contains_invert() {
+            !sheet_byte
+        } else {
+            sheet_byte
+        };
+        fb[(row * FONT_HEIGHT + y) * FB_STRIDE + col] = byte;
     }
-    if attrs.contains_strikethrough() {
-        custom_style = custom_style.strikethrough();
-    }
-    custom_style.build()
 }
 
 pub struct DisplayDriver<SPI> {
     raw_display: CustomDisplay<SPI>,
-    frame_buffer: &'static mut DisplayFrameBuffer,
+    pixel_buffer: &'static mut [u8; BUFFER_SIZE],
     char_buffer: &'static mut [CharCell; CHAR_BUFFER_SIZE],
 }
 
@@ -95,14 +70,14 @@ where
     pub fn new(raw_display: CustomDisplay<SPI>) -> Self {
         Self {
             raw_display,
-            frame_buffer: PIXEL_BUFFER.init_with(|| Framebuffer::new()),
+            pixel_buffer: PIXEL_BUFFER.init_with(|| [0u8; BUFFER_SIZE]),
             char_buffer: CHARACTER_BUFFER
                 .init_with(|| [CharCell::from_u8_lossy(0); CHAR_BUFFER_SIZE]),
         }
     }
 
     pub unsafe fn pixel_buffer_as_mut_ptr(&mut self) -> *mut u8 {
-        self.frame_buffer.data_mut().as_mut_ptr()
+        self.pixel_buffer.as_mut_ptr()
     }
 
     pub unsafe fn char_buffer_as_mut_ptr(&mut self) -> *mut u8 {
@@ -112,33 +87,18 @@ where
     /// Render the character buffer onto the pixel buffer
     pub fn render_chars(&mut self) {
         // draw line-by-line
-        let mut point = Point::new(0, DEFAULT_FONT.character_size.height as i32);
-        let line_height = DEFAULT_TEXT_STYLE.line_height();
         for line_i in 0..self.char_rows() {
             let cells =
                 &self.char_buffer[line_i * self.char_columns()..(line_i + 1) * self.char_columns()];
-            let mut char_point = point;
-            for cell in cells {
-                let text_style = if cell.attrs.is_empty() {
-                    DEFAULT_TEXT_STYLE
-                } else {
-                    build_text_style(cell.attrs)
-                };
-                char_point =
-                    Text::with_alignment(cell.as_str(), char_point, text_style, Alignment::Left)
-                        .draw(self.frame_buffer)
-                        .unwrap();
+            for (col_i, cell) in cells.iter().enumerate() {
+                render_char_cell(self.pixel_buffer, col_i, line_i, cell);
             }
-            // move down a line
-            point += Size::new(0, line_height);
         }
     }
 
     /// Flush the software buffer onto the physical display
     pub async fn flush(&mut self, delay: &mut impl DelayNs) {
-        self.raw_display
-            .update(delay, self.frame_buffer.data())
-            .await;
+        self.raw_display.update(delay, self.pixel_buffer).await;
     }
 
     /// Force clear the physical display
