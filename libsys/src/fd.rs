@@ -1,4 +1,4 @@
-use core::{ffi::c_void, slice::from_raw_parts_mut};
+use core::{ffi::c_void, ptr::NonNull, slice::from_raw_parts_mut};
 
 use sdk::{
     FileDescriptor,
@@ -34,9 +34,10 @@ impl FileDesc {
     /// Can be used when descriptor returns a different data-type than `[u8; N]`.
     ///
     /// # Safety
-    /// Must provide a valid memory address that matches the size of `buf_len`.
-    pub unsafe fn read_ptr(&self, buf: *mut u8, buf_len: usize) -> KernelResult<usize> {
-        let out_read = (abi().read)(self.descriptor, buf, buf_len);
+    /// - Must provide a valid memory address that matches the size of `buf_len`
+    /// - Buffer pointer must not be null
+    pub unsafe fn read_ptr(&self, buf: NonNull<u8>, buf_len: usize) -> KernelResult<usize> {
+        let out_read = (abi().read)(self.descriptor, buf.as_ptr(), buf_len);
         if out_read < 0 {
             return Err(errno::GENERAL);
         }

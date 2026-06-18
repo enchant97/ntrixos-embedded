@@ -1,6 +1,7 @@
 use core::{
     cell::{RefCell, RefMut},
     mem::MaybeUninit,
+    ptr::NonNull,
 };
 
 use embassy_sync::blocking_mutex::{Mutex, raw::ThreadModeRawMutex};
@@ -30,8 +31,10 @@ impl KeyboardRaw {
     pub fn read_key_blocking(&self) -> KernelResult<KeyEvent> {
         let mut event = MaybeUninit::<KeyEvent>::uninit();
         let n = unsafe {
-            FileDesc::from_fd(FileDescriptor::KeyEvents)
-                .read_ptr(event.as_mut_ptr() as *mut u8, size_of::<KeyEvent>())?
+            FileDesc::from_fd(FileDescriptor::KeyEvents).read_ptr(
+                NonNull::new_unchecked(event.as_mut_ptr() as *mut u8),
+                size_of::<KeyEvent>(),
+            )?
         };
         if n != size_of::<KeyEvent>() {
             Err(errno::GENERAL)
