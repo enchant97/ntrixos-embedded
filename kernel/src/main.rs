@@ -29,7 +29,7 @@ use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 use crate::common::AppEntry;
-use crate::drivers::display::{CustomDisplay, DISPLAY_STAT, DisplayDriver};
+use crate::drivers::display::{DISPLAY_STAT, DisplayDriver};
 use crate::memory::get_shell_app_entry;
 
 mod common;
@@ -79,6 +79,7 @@ assign_resources! {
         miso: PIN_16,
         dma_rx: DMA_CH0,
         dma_tx: DMA_CH1,
+        busy: PIN_20,
     },
     usb: UsbResources {
         usb: USB,
@@ -212,15 +213,14 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
     display_spi_config.phase = spi::Phase::CaptureOnSecondTransition;
     let display_spi_cs = gpio::Output::new(r.cs, gpio::Level::Low);
     let display_spi = SpiDeviceWithConfig::new(spi0_bus, display_spi_cs, display_spi_config);
-    let mut raw_display = CustomDisplay::new(display_spi);
+    let display_busy = gpio::Input::new(r.busy, gpio::Pull::Up);
     let mut delay = Delay {};
-    raw_display.init(&mut delay).await;
-    let mut display = DisplayDriver::new(raw_display);
+    let mut display = DisplayDriver::new(display_spi, display_busy);
+    display.init().await;
     unsafe {
         DISPLAY_PIXEL_BUFFER = display.pixel_buffer_as_mut_ptr();
         DISPLAY_CHAR_BUFFER = display.char_buffer_as_mut_ptr();
     }
-    display.clear(&mut delay).await;
     defmt::debug!("display ready");
 
     defmt::debug!("signal core1 to launch shell process");
@@ -230,7 +230,6 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
     loop {
         defmt::debug!("waiting for next display flush");
         FLUSH_DISPLAY_SIG.wait().await;
-        display.render_chars(); // HACK assumes in character-mode
         display.flush(&mut delay).await;
         defmt::debug!("done display flush");
     }
