@@ -20,7 +20,6 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
-use embassy_time::Delay;
 use portable_atomic::AtomicU32;
 use sdk::drivers::display::{DisplayMode, DisplayOperation, DisplayStat};
 use sdk::errno::{self, ErrNo};
@@ -214,7 +213,6 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
     let display_spi_cs = gpio::Output::new(r.cs, gpio::Level::Low);
     let display_spi = SpiDeviceWithConfig::new(spi0_bus, display_spi_cs, display_spi_config);
     let display_busy = gpio::Input::new(r.busy, gpio::Pull::Up);
-    let mut delay = Delay {};
     let mut display = DisplayDriver::new(display_spi, display_busy);
     display.init().await;
     unsafe {
@@ -230,7 +228,7 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
     loop {
         defmt::debug!("waiting for next display flush");
         FLUSH_DISPLAY_SIG.wait().await;
-        display.flush(&mut delay).await;
+        display.flush().await;
         defmt::debug!("done display flush");
     }
 }

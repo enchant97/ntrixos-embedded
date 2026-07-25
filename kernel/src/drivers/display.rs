@@ -1,5 +1,5 @@
 use bytemuck::cast_slice;
-use embedded_hal_async::{delay::DelayNs, digital::Wait, spi::SpiDevice};
+use embedded_hal_async::{digital::Wait, spi::SpiDevice};
 use sdk::drivers::display::{
     CharCell, DisplayStat,
     com::{ControlPacket, DisplayMode, DisplayModeResolution},
@@ -61,7 +61,7 @@ where
     }
 
     /// Flush the software buffer onto display
-    pub async fn flush(&mut self, delay: &mut impl DelayNs) {
+    pub async fn flush(&mut self) {
         for row_i in 0..CHAR_ROWS {
             let row_start = row_i * CHAR_COLS;
             let control_packet = ControlPacket::WriteRowChars(row_i as u16).pack();
