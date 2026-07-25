@@ -21,7 +21,7 @@ An experimental "from scratch" operating system project aimed at the RP2040/RP23
 
 ## Hardware Requirements
 - RP2040 or RP235x microcontroller
-- ST7920 display
+- A [NtrixVDC](https://github.com/NtrixOS/ntrix-vdc), or protocol compatible alternative
 
 ## Contributing
 This is just an personal experiment. Therefore this project is not open for contribution.
