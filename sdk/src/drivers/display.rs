@@ -6,24 +6,25 @@ pub use ntrix_vdc_sdk::com;
 #[derive(PartialEq, Clone, Copy, Debug, TryFromPrimitive)]
 #[repr(usize)]
 pub enum DisplayOperation {
-    GetMode,
-    SetModePixel,
-    SetModeCharacter,
     GetStat,
 }
 
 #[repr(C)]
 #[derive(PartialEq, Clone, Copy, Debug)]
-pub enum DisplayMode {
-    Pixel,
-    Character,
+pub struct DisplayStat {
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug, TryFromPrimitive)]
+#[repr(usize)]
+pub enum DisplayCharOperation {
+    GetStat,
 }
 
 #[repr(C)]
 #[derive(PartialEq, Clone, Copy, Debug)]
-pub struct DisplayStat {
-    pub pixel_width: u32,
-    pub pixel_height: u32,
-    pub char_rows: u32,
-    pub char_cols: u32,
+pub struct DisplayCharStat {
+    pub rows: u32,
+    pub cols: u32,
 }

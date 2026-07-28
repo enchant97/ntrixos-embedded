@@ -1,32 +1,22 @@
 use bytemuck::cast_slice;
 use embedded_hal_async::{digital::Wait, spi::SpiDevice};
 use sdk::drivers::display::{
-    CharCell, DisplayStat,
+    CharCell, DisplayCharStat, DisplayStat,
     com::{ControlPacket, DisplayMode, DisplayModeResolution},
 };
-use static_cell::StaticCell;
 
-const PIXEL_HEIGHT: usize = 120;
-const PIXEL_WIDTH: usize = 160;
-const PIXEL_BUFFER_SIZE: usize = (PIXEL_WIDTH / 8) * PIXEL_HEIGHT;
-const CHAR_ROWS: usize = 15;
-const CHAR_COLS: usize = 20;
-const CHAR_BUFFER_SIZE: usize = CHAR_ROWS * CHAR_COLS;
 pub const DISPLAY_STAT: DisplayStat = DisplayStat {
-    pixel_width: PIXEL_WIDTH as u32,
-    pixel_height: PIXEL_HEIGHT as u32,
-    char_rows: CHAR_ROWS as u32,
-    char_cols: CHAR_COLS as u32,
+    width: 160,
+    height: 120,
 };
-
-static PIXEL_BUFFER: StaticCell<[u8; PIXEL_BUFFER_SIZE]> = StaticCell::new();
-static CHARACTER_BUFFER: StaticCell<[CharCell; CHAR_BUFFER_SIZE]> = StaticCell::new();
+pub const DISPLAY_CHAR_STAT: DisplayCharStat = DisplayCharStat { rows: 15, cols: 20 };
 
 pub struct DisplayDriver<SPI, BUSY> {
     spi: SPI,
     busy: BUSY,
-    pixel_buffer: &'static mut [u8; PIXEL_BUFFER_SIZE],
-    char_buffer: &'static mut [CharCell; CHAR_BUFFER_SIZE],
+    mode: DisplayMode,
+    pixel_stat: DisplayStat,
+    char_stat: Option<DisplayCharStat>,
 }
 
 impl<SPI, BUSY> DisplayDriver<SPI, BUSY>
@@ -34,46 +24,95 @@ where
     SPI: SpiDevice,
     BUSY: Wait,
 {
-    pub fn new(spi: SPI, busy: BUSY) -> Self {
-        Self {
+    pub async fn init(spi: SPI, busy: BUSY) -> Self {
+        let mut d = Self {
             spi,
             busy,
-            pixel_buffer: PIXEL_BUFFER.init_with(|| [0u8; PIXEL_BUFFER_SIZE]),
-            char_buffer: CHARACTER_BUFFER
-                .init_with(|| [CharCell::from_u8_lossy(0); CHAR_BUFFER_SIZE]),
-        }
+            mode: DisplayMode::default(),
+            pixel_stat: DisplayStat {
+                width: 640,
+                height: 320,
+            },
+            char_stat: None,
+        };
+        d.reset().await;
+        d
     }
 
-    pub unsafe fn pixel_buffer_as_mut_ptr(&mut self) -> *mut u8 {
-        self.pixel_buffer.as_mut_ptr()
+    fn update_stats(&mut self) {
+        let res = self.mode.resolution();
+        self.pixel_stat = DisplayStat {
+            width: res.width() as u32,
+            height: res.height() as u32,
+        };
+        self.char_stat = if self.mode.chars_enabled() {
+            const FONT_WIDTH: usize = 8;
+            const FONT_HEIGHT: usize = 8;
+            Some(DisplayCharStat {
+                rows: self.pixel_stat.height / FONT_HEIGHT as u32,
+                cols: self.pixel_stat.width / FONT_WIDTH as u32,
+            })
+        } else {
+            None
+        };
     }
 
-    pub unsafe fn char_buffer_as_mut_ptr(&mut self) -> *mut u8 {
-        self.char_buffer.as_mut_ptr() as *mut u8
-    }
-
-    /// Setup the display
-    pub async fn init(&mut self) {
-        let mode_packet =
-            ControlPacket::SetMode(DisplayMode::new(DisplayModeResolution::R160x120, true)).pack();
+    async fn reset(&mut self) {
+        // HACK replace this with actual reset, when user selectable modes is implemented
+        self.mode = DisplayMode::new(DisplayModeResolution::R160x120, true);
+        let mode_packet = ControlPacket::SetMode(self.mode).pack();
         self.busy.wait_for_low().await.unwrap();
         self.spi.write(&mode_packet).await.unwrap();
+        self.update_stats();
+
+        //let reset_packet = ControlPacket::Reset.pack();
+        //self.busy.wait_for_low().await.unwrap();
+        //self.spi.write(&reset_packet).await.unwrap();
+        //self.mode = DisplayMode::default();
     }
 
-    /// Flush the software buffer onto display
-    pub async fn flush(&mut self) {
-        for row_i in 0..CHAR_ROWS {
-            let row_start = row_i * CHAR_COLS;
-            let control_packet = ControlPacket::WriteRowChars(row_i as u16).pack();
-            self.busy.wait_for_low().await.unwrap();
-            self.spi.write(&control_packet).await.unwrap();
-            self.busy.wait_for_low().await.unwrap();
-            self.spi
-                .write(cast_slice(
-                    &self.char_buffer[row_start..row_start + CHAR_COLS],
-                ))
-                .await
-                .unwrap();
+    pub async fn get_stat(&self) -> DisplayStat {
+        self.pixel_stat
+    }
+
+    pub async fn get_char_stat(&self) -> Option<DisplayCharStat> {
+        self.char_stat
+    }
+
+    pub async fn set_mode(&mut self, new_mode: DisplayMode) {
+        let mode_packet = ControlPacket::SetMode(new_mode).pack();
+        self.busy.wait_for_low().await.unwrap();
+        self.spi.write(&mode_packet).await.unwrap();
+        self.update_stats();
+    }
+
+    pub async fn flush_pixel(&mut self) {
+        todo!()
+    }
+
+    /// Flush the char-cell software buffer onto display.
+    ///
+    /// - Only has effect when character mode is enabled.
+    pub async fn flush_char(&mut self, buff: &[CharCell]) {
+        if let Some(stat) = self.char_stat {
+            let rows = stat.rows as usize;
+            let cols = stat.cols as usize;
+
+            if buff.len() != rows * cols {
+                panic!("provided buffer not expected size");
+            }
+
+            for row_i in 0..rows {
+                let row_start = row_i * cols;
+                let control_packet = ControlPacket::WriteRowChars(row_i as u16).pack();
+                self.busy.wait_for_low().await.unwrap();
+                self.spi.write(&control_packet).await.unwrap();
+                self.busy.wait_for_low().await.unwrap();
+                self.spi
+                    .write(cast_slice(&buff[row_start..row_start + cols]))
+                    .await
+                    .unwrap();
+            }
         }
     }
 }

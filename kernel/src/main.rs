@@ -3,13 +3,17 @@
 #![allow(static_mut_refs)]
 
 use assign_resources::assign_resources;
+use core::cell::RefCell;
 use core::ffi::c_void;
-use core::ptr::{addr_of_mut, null_mut};
+use core::ptr::{NonNull, addr_of_mut};
+use core::slice::from_raw_parts;
 use core::sync::atomic::Ordering;
+use defmt_rtt as _;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDeviceWithConfig;
 use embassy_executor::Executor;
 use embassy_futures::join::join;
 use embassy_rp::peripherals::{DMA_CH1, SPI0, USB};
+use embassy_rp::spinlock_mutex::blocking_mutex::SpinlockMutex;
 use embassy_rp::{
     Peri, bind_interrupts, gpio,
     multicore::Stack,
@@ -20,20 +24,62 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, signal::Signal,
 };
-use portable_atomic::AtomicU32;
-use sdk::drivers::display::{DisplayMode, DisplayOperation, DisplayStat};
+use portable_atomic::{AtomicBool, AtomicU32};
+use sdk::drivers::display::{
+    CharCell, DisplayCharOperation, DisplayCharStat, DisplayOperation, DisplayStat,
+};
 use sdk::errno::{self, ErrNo};
 use sdk::{FileDescriptor, KernelAbi};
 use static_cell::StaticCell;
-use {defmt_rtt as _, panic_probe as _};
+use tryslab::Slab;
+use tryslab::heapless::DequeSlab;
 
-use crate::common::AppEntry;
-use crate::drivers::display::{DISPLAY_STAT, DisplayDriver};
+use crate::common::{AppEntry, RawPtr, RdTableEntry};
+use crate::drivers::display::{DISPLAY_CHAR_STAT, DISPLAY_STAT, DisplayDriver};
 use crate::memory::get_shell_app_entry;
 
 mod common;
 mod drivers;
 mod memory;
+
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    use embassy_rp::gpio;
+    use embedded_hal::delay::DelayNs;
+    // guard against recursive panic
+    static KERNEL_PANICKING: AtomicBool = AtomicBool::new(false);
+    if KERNEL_PANICKING.swap(true, Ordering::SeqCst) {
+        #[cfg(feature = "debug-panic")]
+        cortex_m::asm::udf();
+        #[cfg(not(feature = "debug-panic"))]
+        loop {
+            cortex_m::asm::nop();
+        }
+    } else {
+        cortex_m::interrupt::disable();
+        // forcefully stop core1 using hardware register
+        embassy_rp::pac::PSM
+            .frce_off()
+            .modify(|w| w.set_proc1(true));
+        // always output full panic info over rtt
+        defmt::error!("{}", defmt::Display2Format(info));
+        #[cfg(feature = "debug-panic")]
+        {
+            cortex_m::asm::udf();
+        }
+        #[cfg(not(feature = "debug-panic"))]
+        {
+            // this status led only works on non-w variants
+            let led_pin = unsafe { embassy_rp::peripherals::PIN_25::steal() };
+            let mut led = gpio::Output::new(led_pin, gpio::Level::Low);
+            let mut delay = embassy_time::Delay;
+            loop {
+                led.toggle();
+                delay.delay_ms(1000);
+            }
+        }
+    }
+}
 
 static mut APP_STACK: Stack<4096> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
@@ -45,7 +91,9 @@ pub static KERNEL_ABI: KernelAbi = KernelAbi {
     read: abi_read,
     flush: abi_flush,
     seek: abi_seek,
-    mmap: abi_mmap,
+    r_map: abi_r_map,
+    r_sync: abi_r_sync,
+    r_unmap: abi_r_unmap,
     ioctl: abi_ioctl,
 };
 
@@ -58,9 +106,11 @@ pub static APP_LAUNCH_SIG: Signal<CriticalSectionRawMutex, AppEntry> = Signal::n
 
 static SPI0_BUS: StaticCell<Mutex<CriticalSectionRawMutex, Spi<SPI0, spi::Async>>> =
     StaticCell::new();
-static FLUSH_DISPLAY_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-static mut DISPLAY_PIXEL_BUFFER: *mut u8 = null_mut();
-static mut DISPLAY_CHAR_BUFFER: *mut u8 = null_mut();
+static FLUSH_CHAR_DISPLAY_SIG: Signal<CriticalSectionRawMutex, RdTableEntry> = Signal::new();
+static FLUSH_CHAR_DISPLAY_DONE_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+const RD_TABLE_SPINLOCK_N: usize = 1;
+static RD_TABLE: SpinlockMutex<RD_TABLE_SPINLOCK_N, RefCell<DequeSlab<RdTableEntry, 4>>> =
+    SpinlockMutex::new(RefCell::new(DequeSlab::new()));
 
 const MAX_KEYBOARD_EVENTS_BACKLOG: usize = 6;
 static KEYBOARD_EVENT_CHANNEL: Channel<
@@ -120,6 +170,7 @@ extern "C" fn abi_write(fd: FileDescriptor, buff: *const u8, buff_len: usize) {
 extern "C" fn abi_read(fd: FileDescriptor, buff: *mut u8, buff_len: usize) -> isize {
     match fd {
         FileDescriptor::Display => -1,
+        FileDescriptor::DisplayChar => -1,
         FileDescriptor::KeyEvents => {
             use sdk::drivers::keyboard::KeyEvent;
             if buff_len < size_of::<KeyEvent>() {
@@ -144,25 +195,53 @@ extern "C" fn abi_read(fd: FileDescriptor, buff: *mut u8, buff_len: usize) -> is
     }
 }
 
-extern "C" fn abi_flush(fd: FileDescriptor) {
-    match fd {
-        FileDescriptor::Display => FLUSH_DISPLAY_SIG.signal(()),
-        FileDescriptor::KeyEvents => {}
-    }
-}
+extern "C" fn abi_flush(fd: FileDescriptor) {}
 
 extern "C" fn abi_seek(fd: FileDescriptor, offset: usize) {
     todo!()
 }
 
-extern "C" fn abi_mmap(fd: FileDescriptor) -> *mut c_void {
+extern "C" fn abi_r_map(addr: *mut u8, len: usize, fd: FileDescriptor) -> isize {
     match fd {
-        FileDescriptor::Display => unsafe {
-            // HACK assumes character-mode
-            DISPLAY_CHAR_BUFFER as *mut c_void
-        },
-        FileDescriptor::KeyEvents => null_mut(),
+        FileDescriptor::DisplayChar => RD_TABLE.lock(|rd_table| {
+            let mut rd_table = rd_table.borrow_mut();
+            let raw_ptr = if let Some(addr) = NonNull::new(addr) {
+                RawPtr(addr)
+            } else {
+                return -1;
+            };
+            let ref_desc = rd_table
+                .try_insert(RdTableEntry { raw_ptr, len, fd })
+                .unwrap();
+            ref_desc as isize
+        }),
+        _ => -1,
     }
+}
+
+extern "C" fn abi_r_sync(desc: isize) -> isize {
+    RD_TABLE.lock(|rd_table| {
+        let rd_table = rd_table.borrow_mut();
+        let rd_ref = *rd_table.get(desc as usize).unwrap();
+        match rd_ref.fd {
+            FileDescriptor::DisplayChar => {
+                FLUSH_CHAR_DISPLAY_SIG.signal(rd_ref);
+                while !FLUSH_CHAR_DISPLAY_DONE_SIG.signaled() {
+                    cortex_m::asm::nop();
+                }
+                FLUSH_CHAR_DISPLAY_DONE_SIG.reset();
+                0
+            }
+            _ => -1,
+        }
+    })
+}
+
+extern "C" fn abi_r_unmap(desc: isize) -> isize {
+    RD_TABLE.lock(|rd_table| {
+        let mut rd_table = rd_table.borrow_mut();
+        rd_table.try_remove(desc as usize).map(|_| 0).unwrap_or(-1)
+    })
 }
 
 extern "C" fn abi_ioctl(
@@ -175,14 +254,17 @@ extern "C" fn abi_ioctl(
         FileDescriptor::Display => {
             let disp_op = DisplayOperation::try_from(op).unwrap();
             match disp_op {
-                DisplayOperation::GetMode => unsafe {
-                    *(out_arg as *mut DisplayMode) = DisplayMode::Character;
-                },
                 DisplayOperation::GetStat => unsafe {
                     *(out_arg as *mut DisplayStat) = DISPLAY_STAT;
                 },
-                DisplayOperation::SetModeCharacter => {}
-                _ => todo!(),
+            }
+        }
+        FileDescriptor::DisplayChar => {
+            let disp_op = DisplayCharOperation::try_from(op).unwrap();
+            match disp_op {
+                DisplayCharOperation::GetStat => unsafe {
+                    *(out_arg as *mut DisplayCharStat) = DISPLAY_CHAR_STAT;
+                },
             }
         }
         _ => todo!(),
@@ -213,12 +295,7 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
     let display_spi_cs = gpio::Output::new(r.cs, gpio::Level::Low);
     let display_spi = SpiDeviceWithConfig::new(spi0_bus, display_spi_cs, display_spi_config);
     let display_busy = gpio::Input::new(r.busy, gpio::Pull::Up);
-    let mut display = DisplayDriver::new(display_spi, display_busy);
-    display.init().await;
-    unsafe {
-        DISPLAY_PIXEL_BUFFER = display.pixel_buffer_as_mut_ptr();
-        DISPLAY_CHAR_BUFFER = display.char_buffer_as_mut_ptr();
-    }
+    let mut display = DisplayDriver::init(display_spi, display_busy).await;
     defmt::debug!("display ready");
 
     defmt::debug!("signal core1 to launch shell process");
@@ -227,8 +304,11 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
 
     loop {
         defmt::debug!("waiting for next display flush");
-        FLUSH_DISPLAY_SIG.wait().await;
-        display.flush().await;
+        let rd_ref = FLUSH_CHAR_DISPLAY_SIG.wait().await;
+        let buff: &[CharCell] =
+            unsafe { from_raw_parts(rd_ref.raw_ptr.as_ptr() as *const CharCell, rd_ref.len) };
+        display.flush_char(buff).await;
+        FLUSH_CHAR_DISPLAY_DONE_SIG.signal(());
         defmt::debug!("done display flush");
     }
 }
@@ -304,6 +384,8 @@ fn user_process_supervisor() -> ! {
 
     defmt::debug!("starting user process supervisor");
     loop {
+        RD_TABLE.lock(|rd| rd.borrow_mut().clear()); // TODO should be a kernel task
+
         if let Some(app_entry) = APP_LAUNCH_SIG.try_take() {
             defmt::debug!("core1 received new app entry, launching...");
             APP_EXIT_SIG.reset();

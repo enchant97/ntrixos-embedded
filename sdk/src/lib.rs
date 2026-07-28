@@ -10,6 +10,7 @@ pub mod errno;
 pub enum FileDescriptor {
     KeyEvents,
     Display,
+    DisplayChar,
 }
 
 #[repr(C)]
@@ -26,10 +27,9 @@ pub struct KernelAbi {
     ///
     /// Only one cursor exists per file descriptor.
     pub seek: extern "C" fn(fd: FileDescriptor, offset: usize),
-    /// Get a shared buffer for given file descriptor.
-    ///
-    /// - Requires `flush(fd)` to ensure changes get written.
-    pub mmap: extern "C" fn(fd: FileDescriptor) -> *mut c_void,
+    pub r_map: extern "C" fn(addr: *mut u8, len: usize, fd: FileDescriptor) -> isize,
+    pub r_sync: extern "C" fn(desc: isize) -> isize,
+    pub r_unmap: extern "C" fn(desc: isize) -> isize,
     /// Device Control
     ///
     /// Each type of device will have a different set of available commands and argument values.

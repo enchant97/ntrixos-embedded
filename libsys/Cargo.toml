@@ -10,3 +10,4 @@ nostd = { version = "0.1", default-features = false, features = [ "io" ] }
 embassy-sync = "0.8"
 bytemuck = { version = "1.25" }
 heapless = "0.9"
+portable-atomic = { version = "1.14", default-features = false, features = ["unsafe-assume-single-core"] }

@@ -1,10 +1,12 @@
 //! A terminal handler for a display
 #![allow(clippy::too_many_arguments)]
-use crate::{
-    display::{CharacterDisplay, DisplayRaw},
-    sdk::drivers::display::{CharAttributes, CharCell, DisplayMode},
-};
 use heapless::Vec;
+use sdk::drivers::display::DisplayCharStat;
+
+use crate::{
+    char_display::CharDisplayBuffer,
+    sdk::drivers::display::{CharAttributes, CharCell},
+};
 
 type PromptPrefx = [CharCell; 2];
 const PROMPT_PREFIX: PromptPrefx = [CharCell::from_u8_lossy(b'?'), CharCell::from_u8_lossy(b'>')];
@@ -59,27 +61,23 @@ struct TerminalStat {
     cols: usize,
 }
 
-pub struct Terminal<'a, const PROMPT_BUFFER: usize> {
+pub struct Terminal<'a, 'b, const PROMPT_BUFFER: usize> {
     current_row: usize,
-    display: &'a mut DisplayRaw,
+    buf: &'a mut CharDisplayBuffer<'b>,
     term_stat: TerminalStat,
     prompt_buffer: Vec<u8, PROMPT_BUFFER>,
     prompt_start_row: Option<usize>,
     prompt_cursor: TerminalCursor,
 }
 
-impl<'a, const PROMPT_BUFFER: usize> Terminal<'a, PROMPT_BUFFER> {
-    pub fn setup(display: &'a mut DisplayRaw) -> Self {
-        display
-            .set_display_mode(DisplayMode::Character)
-            .expect("failed to set mode");
-        let display_stat = display.get_display_stat().expect("failed to get stat");
+impl<'a, 'b, const PROMPT_BUFFER: usize> Terminal<'a, 'b, PROMPT_BUFFER> {
+    pub fn setup(buf: &'a mut CharDisplayBuffer<'b>, stat: &DisplayCharStat) -> Self {
         let mut term = Self {
             current_row: 0,
-            display,
+            buf,
             term_stat: TerminalStat {
-                rows: display_stat.char_rows as usize,
-                cols: display_stat.char_cols as usize,
+                rows: stat.rows as usize,
+                cols: stat.cols as usize,
             },
             prompt_buffer: Vec::new(),
             prompt_start_row: None,
@@ -94,67 +92,37 @@ impl<'a, const PROMPT_BUFFER: usize> Terminal<'a, PROMPT_BUFFER> {
         self.current_row = 0;
         self.prompt_buffer.clear();
         self.prompt_start_row = None;
-        self.display.with_charcell_buffer_flushed(|fb| {
-            fb.fill(CharCell::from_u8_lossy(b' '));
-        });
+        self.buf
+            .with_buffer_flushed(|buf| {
+                buf.fill(CharCell::from_u8_lossy(b' '));
+            })
+            .unwrap();
     }
 
     pub fn feed_output_line(&mut self, cells: &[CharCell]) {
-        self.display.with_charcell_buffer_flushed(|fb| {
-            draw_line(
-                fb,
-                self.term_stat,
-                cells,
-                None,
-                None,
-                &mut self.current_row,
-                &mut self.prompt_start_row,
-            );
-        });
+        self.buf
+            .with_buffer_flushed(|buf| {
+                draw_line(
+                    buf,
+                    self.term_stat,
+                    cells,
+                    None,
+                    None,
+                    &mut self.current_row,
+                    &mut self.prompt_start_row,
+                );
+            })
+            .unwrap();
     }
 
     pub fn start_prompt(&mut self) {
         self.prompt_buffer.clear();
         self.prompt_cursor.enable();
         self.prompt_start_row = Some(self.current_row);
-        self.display.with_charcell_buffer_flushed(|fb| {
-            redraw_prompt(
-                fb,
-                self.term_stat,
-                &PROMPT_PREFIX,
-                &PROMPT_WRAP_PREFIX,
-                &mut self.current_row,
-                &mut self.prompt_start_row,
-                self.prompt_cursor,
-                &self.prompt_buffer,
-            );
-        });
-    }
-
-    pub fn feed_prompt(&mut self, glyph: u8) -> Result<(), u8> {
-        self.prompt_buffer.push(glyph)?;
-        self.prompt_cursor.move_right(1);
-        self.display.with_charcell_buffer_flushed(|fb| {
-            redraw_prompt(
-                fb,
-                self.term_stat,
-                &PROMPT_PREFIX,
-                &PROMPT_WRAP_PREFIX,
-                &mut self.current_row,
-                &mut self.prompt_start_row,
-                self.prompt_cursor,
-                &self.prompt_buffer,
-            );
-        });
-        Ok(())
-    }
-
-    pub fn feed_prompt_backspace(&mut self) {
-        if self.prompt_buffer.pop().is_some() {
-            self.prompt_cursor.move_left(1);
-            self.display.with_charcell_buffer_flushed(|fb| {
+        self.buf
+            .with_buffer_flushed(|buf| {
                 redraw_prompt(
-                    fb,
+                    buf,
                     self.term_stat,
                     &PROMPT_PREFIX,
                     &PROMPT_WRAP_PREFIX,
@@ -163,24 +131,66 @@ impl<'a, const PROMPT_BUFFER: usize> Terminal<'a, PROMPT_BUFFER> {
                     self.prompt_cursor,
                     &self.prompt_buffer,
                 );
-            });
+            })
+            .unwrap();
+    }
+
+    pub fn feed_prompt(&mut self, glyph: u8) -> Result<(), u8> {
+        self.prompt_buffer.push(glyph)?;
+        self.prompt_cursor.move_right(1);
+        self.buf
+            .with_buffer_flushed(|buf| {
+                redraw_prompt(
+                    buf,
+                    self.term_stat,
+                    &PROMPT_PREFIX,
+                    &PROMPT_WRAP_PREFIX,
+                    &mut self.current_row,
+                    &mut self.prompt_start_row,
+                    self.prompt_cursor,
+                    &self.prompt_buffer,
+                );
+            })
+            .unwrap();
+        Ok(())
+    }
+
+    pub fn feed_prompt_backspace(&mut self) {
+        if self.prompt_buffer.pop().is_some() {
+            self.prompt_cursor.move_left(1);
+            self.buf
+                .with_buffer_flushed(|buf| {
+                    redraw_prompt(
+                        buf,
+                        self.term_stat,
+                        &PROMPT_PREFIX,
+                        &PROMPT_WRAP_PREFIX,
+                        &mut self.current_row,
+                        &mut self.prompt_start_row,
+                        self.prompt_cursor,
+                        &self.prompt_buffer,
+                    );
+                })
+                .unwrap();
         }
     }
 
     pub fn end_prompt(&mut self) -> Vec<u8, PROMPT_BUFFER> {
         self.prompt_cursor.disable();
-        self.display.with_charcell_buffer_flushed(|fb| {
-            redraw_prompt(
-                fb,
-                self.term_stat,
-                &PROMPT_PREFIX,
-                &PROMPT_WRAP_PREFIX,
-                &mut self.current_row,
-                &mut self.prompt_start_row,
-                self.prompt_cursor,
-                &self.prompt_buffer,
-            );
-        });
+        self.buf
+            .with_buffer_flushed(|buf| {
+                redraw_prompt(
+                    buf,
+                    self.term_stat,
+                    &PROMPT_PREFIX,
+                    &PROMPT_WRAP_PREFIX,
+                    &mut self.current_row,
+                    &mut self.prompt_start_row,
+                    self.prompt_cursor,
+                    &self.prompt_buffer,
+                );
+            })
+            .unwrap();
         let out = self.prompt_buffer.clone();
         self.prompt_buffer.clear();
         self.prompt_start_row = None;

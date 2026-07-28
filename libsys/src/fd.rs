@@ -1,4 +1,4 @@
-use core::{ffi::c_void, ptr::NonNull, slice::from_raw_parts_mut};
+use core::{ffi::c_void, ptr::NonNull};
 
 use sdk::{
     FileDescriptor,
@@ -6,6 +6,8 @@ use sdk::{
 };
 
 use crate::core::abi;
+
+pub type RefDesc = isize;
 
 pub struct FileDesc {
     descriptor: FileDescriptor,
@@ -48,13 +50,19 @@ impl FileDesc {
         (abi().flush)(self.descriptor);
     }
 
-    pub fn mmap<'a>(&mut self, len: usize) -> Option<&'a mut [u8]> {
-        let ptr = (abi().mmap)(self.descriptor);
-        if ptr.is_null() {
-            None
-        } else {
-            unsafe { Some(from_raw_parts_mut(ptr as *mut u8, len)) }
-        }
+    pub fn r_map(&mut self, addr: NonNull<u8>, len: usize) -> KernelResult<RefDesc> {
+        let desc = (abi().r_map)(addr.as_ptr(), len, self.descriptor);
+        if desc >= 0 { Ok(desc) } else { Err(desc) }
+    }
+
+    pub fn r_sync(&mut self, ref_desc: RefDesc) -> KernelResult<()> {
+        let code = (abi().r_sync)(ref_desc);
+        if code >= 0 { Ok(()) } else { Err(code) }
+    }
+
+    pub fn r_unmap(&mut self, ref_desc: RefDesc) -> KernelResult<()> {
+        let code = (abi().r_unmap)(ref_desc);
+        if code >= 0 { Ok(()) } else { Err(code) }
     }
 
     pub fn ioctl(
