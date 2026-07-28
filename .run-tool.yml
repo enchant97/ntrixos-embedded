@@ -1,0 +1,18 @@
+targets:
+  build-shell:
+    program: "cargo"
+    args:
+      - objcopy
+      - -p
+      - shell
+      - --release
+      - --
+      - -O
+      - binary
+      - ./target/thumbv6m-none-eabi/bin/shell.bin
+  run-kernel:
+    program: "cargo"
+    args:
+      - run
+      - -p
+      - kernel
