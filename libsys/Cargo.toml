@@ -9,5 +9,7 @@ sdk = { path = "../sdk" }
 nostd = { version = "0.1", default-features = false, features = [ "io" ] }
 embassy-sync = "0.8"
 bytemuck = { version = "1.25" }
+num_enum = { version = "0.7.6", default-features = false }
 heapless = "0.9"
 portable-atomic = { version = "1.14", default-features = false, features = ["unsafe-assume-single-core"] }
+cortex-m = { version = "0.7.6", features = ["inline-asm"] }

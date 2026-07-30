@@ -6,8 +6,9 @@ MEMORY {
     /* define app section memory areas */
     SHELL_FLASH : ORIGIN = 0x10040000, LENGTH = 1792K
     APP_RAM : ORIGIN = 0x20020000, LENGTH = 128K
-    /* shared, for future use with syscalls */
-    IPC_RAM : ORIGIN = 0x20040000, LENGTH = 4K
+    /* Shared memory for storing Syscall message */
+    /* NOTE: not all 4K is actually used */
+    SYSCALL_MSG : ORIGIN = 0x20040000, LENGTH = 4K
 }
 
 SECTIONS {
@@ -17,4 +18,9 @@ SECTIONS {
     .shell_flash_slot : {
         KEEP(*(.shell_flash_slot))
     } > SHELL_FLASH
+
+    .syscall_message (NOLOAD) : {
+        SYSCALL_MESSAGE = .;
+        . += 32; /* sizeof(Syscall) */
+    } > SYSCALL_MSG
 }

@@ -23,6 +23,7 @@ portable-atomic = { version = "1.13", features = [ "critical-section" ] }
 defmt = "1.0.1"
 defmt-rtt = "1.1.0"
 bytemuck = "1.25.2"
+num_enum = { version = "0.7.6", default-features = false }
 tryslab = { version = "0.1.0", default-features = false, features = [ "heapless" ] }
 
 [features]

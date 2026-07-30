@@ -4,7 +4,6 @@
 
 use assign_resources::assign_resources;
 use core::cell::RefCell;
-use core::ffi::c_void;
 use core::ptr::{NonNull, addr_of_mut};
 use core::slice::from_raw_parts;
 use core::sync::atomic::Ordering;
@@ -12,6 +11,7 @@ use defmt_rtt as _;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDeviceWithConfig;
 use embassy_executor::Executor;
 use embassy_futures::join::join;
+use embassy_rp::interrupt;
 use embassy_rp::peripherals::{DMA_CH1, SPI0, USB};
 use embassy_rp::spinlock_mutex::blocking_mutex::SpinlockMutex;
 use embassy_rp::{
@@ -29,7 +29,8 @@ use sdk::drivers::display::{
     CharCell, DisplayCharOperation, DisplayCharStat, DisplayOperation, DisplayStat,
 };
 use sdk::errno::{self, ErrNo};
-use sdk::{FileDescriptor, KernelAbi};
+use sdk::syscall::SyscallNum;
+use sdk::{FileDescriptor, kcom};
 use static_cell::StaticCell;
 use tryslab::Slab;
 use tryslab::heapless::DequeSlab;
@@ -37,10 +38,15 @@ use tryslab::heapless::DequeSlab;
 use crate::common::{AppEntry, RawPtr, RdTableEntry};
 use crate::drivers::display::{DISPLAY_CHAR_STAT, DISPLAY_STAT, DisplayDriver};
 use crate::memory::get_shell_app_entry;
+use crate::signaling::{
+    k_signal_user_restart, k_signal_user_restart_reset, k_signal_user_restart_setup,
+};
 
 mod common;
 mod drivers;
 mod memory;
+mod signaling;
+mod syscall;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -84,18 +90,58 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 static mut APP_STACK: Stack<4096> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 
-pub static KERNEL_ABI: KernelAbi = KernelAbi {
-    get_version: abi_get_version,
-    exit: abi_exit,
-    write: abi_write,
-    read: abi_read,
-    flush: abi_flush,
-    seek: abi_seek,
-    r_map: abi_r_map,
-    r_sync: abi_r_sync,
-    r_unmap: abi_r_unmap,
-    ioctl: abi_ioctl,
-};
+static KCOM_REQ: Signal<CriticalSectionRawMutex, kcom::KComType> = Signal::new();
+
+#[interrupt]
+unsafe fn SIO_IRQ_PROC0() {
+    let sio = embassy_rp::pac::SIO;
+    sio.fifo().st().write(|w| w.set_wof(false)); // ack overflow flag
+    while sio.fifo().st().read().vld() {
+        let kcom_type = unsafe { kcom::read_kcom_fifo_unchecked().unwrap() };
+        KCOM_REQ.signal(kcom_type);
+    }
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn TIMER_IRQ_3() {
+    // perform exception return, by building frame.
+    core::arch::naked_asm!(
+        "mov r4, lr",
+        "mov r0, sp",
+        "bl {handler}",
+        "mov sp, r0",
+        "bx r4",
+        handler = sym build_restart_frame,
+    )
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn build_restart_frame(_old_frame: u32) -> u32 {
+    k_signal_user_restart_reset();
+
+    let code = -1; // TODO get real exit code
+    APP_EXIT_SIG.signal(code);
+    if !APP_LAUNCH_SIG.signaled() {
+        // TODO this should be a kernel task
+        // TODO memory is not reset
+        APP_LAUNCH_SIG.signal(get_shell_app_entry());
+    }
+
+    let supervisor_sp = APP_SUPERVISOR_SP.load(Ordering::Acquire);
+    let frame_base = (supervisor_sp - 32) as *mut u32;
+    unsafe {
+        core::ptr::write_volatile(frame_base.add(0), 0); // r0
+        core::ptr::write_volatile(frame_base.add(1), 0); // r1
+        core::ptr::write_volatile(frame_base.add(2), 0); // r2
+        core::ptr::write_volatile(frame_base.add(3), 0); // r3
+        core::ptr::write_volatile(frame_base.add(4), 0); // r12
+        core::ptr::write_volatile(frame_base.add(5), 0); // LR (unused, supervisor never "returns")
+        core::ptr::write_volatile(frame_base.add(6), user_process_supervisor as u32); // return PC
+        core::ptr::write_volatile(frame_base.add(7), 0x0100_0000); // xPSR, T-bit set
+    }
+    frame_base as u32
+}
 
 /// Used to get back to the app supervisor to launch/relaunch app.
 static APP_SUPERVISOR_SP: AtomicU32 = AtomicU32::new(0);
@@ -140,89 +186,87 @@ bind_interrupts!(struct Irqs{
     USBCTRL_IRQ => embassy_rp::usb::host::InterruptHandler<USB>;
 });
 
-extern "C" fn abi_get_version() -> u32 {
-    1
+fn syscall_exit() {
+    // TODO use exit code
+    let code = syscall::unpack_exit_args();
+    k_signal_user_restart();
 }
 
-extern "C" fn abi_exit(code: ErrNo) -> ! {
-    APP_EXIT_SIG.signal(code);
-    if !APP_LAUNCH_SIG.signaled() {
-        // TODO this should be a kernel task
-        // TODO memory is not reset
-        APP_LAUNCH_SIG.signal(get_shell_app_entry());
-    }
-    let sp = APP_SUPERVISOR_SP.load(Ordering::Acquire);
-    unsafe {
-        core::arch::asm!(
-        "mov sp, {sp}",
-        "bx {resume}",
-        sp=in(reg) sp,
-        resume = in(reg) user_process_supervisor as u32 | 1,
-        options(noreturn)
-        );
-    }
-}
-
-extern "C" fn abi_write(fd: FileDescriptor, buff: *const u8, buff_len: usize) {
-    todo!()
-}
-
-extern "C" fn abi_read(fd: FileDescriptor, buff: *mut u8, buff_len: usize) -> isize {
-    match fd {
+fn syscall_read() {
+    let req = syscall::unpack_read();
+    let result = match req.fd {
         FileDescriptor::Display => -1,
         FileDescriptor::DisplayChar => -1,
         FileDescriptor::KeyEvents => {
             use sdk::drivers::keyboard::KeyEvent;
-            if buff_len < size_of::<KeyEvent>() {
+            if req.len < size_of::<KeyEvent>() {
                 // buffer too small
-                return -1;
-            }
-            // TODO this ignores a buffer with more than 1 event space
-            //      only ever returns 1 event
-            let event: KeyEvent;
-            loop {
-                if let Ok(v) = KEYBOARD_EVENT_CHANNEL.try_receive() {
-                    event = v;
-                    break;
+                -1
+            } else {
+                // TODO this ignores a buffer with more than 1 event space
+                //      only ever returns 1 event
+                let event: KeyEvent;
+                loop {
+                    if let Ok(v) = KEYBOARD_EVENT_CHANNEL.try_receive() {
+                        event = v;
+                        break;
+                    }
+                    cortex_m::asm::wfe();
                 }
-                cortex_m::asm::wfe();
+                unsafe {
+                    (req.buf as *mut KeyEvent).write(event);
+                }
+                size_of::<KeyEvent>() as isize
             }
-            unsafe {
-                (buff as *mut KeyEvent).write(event);
-            }
-            size_of::<KeyEvent>() as isize
         }
-    }
+    };
+    syscall::pack_response(SyscallNum::Read, result);
+    kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
 }
 
-extern "C" fn abi_flush(fd: FileDescriptor) {}
-
-extern "C" fn abi_seek(fd: FileDescriptor, offset: usize) {
-    todo!()
-}
-
-extern "C" fn abi_r_map(addr: *mut u8, len: usize, fd: FileDescriptor) -> isize {
-    match fd {
+fn syscall_r_map() {
+    let req = syscall::unpack_r_map();
+    let result = match req.fd {
         FileDescriptor::DisplayChar => RD_TABLE.lock(|rd_table| {
             let mut rd_table = rd_table.borrow_mut();
-            let raw_ptr = if let Some(addr) = NonNull::new(addr) {
+            let raw_ptr = if let Some(addr) = NonNull::new(req.addr) {
                 RawPtr(addr)
             } else {
                 return -1;
             };
             let ref_desc = rd_table
-                .try_insert(RdTableEntry { raw_ptr, len, fd })
+                .try_insert(RdTableEntry {
+                    raw_ptr,
+                    len: req.len,
+                    fd: req.fd,
+                })
                 .unwrap();
             ref_desc as isize
         }),
         _ => -1,
-    }
+    };
+    syscall::pack_response(SyscallNum::RMap, result);
+    kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
 }
 
-extern "C" fn abi_r_sync(desc: isize) -> isize {
-    RD_TABLE.lock(|rd_table| {
+fn syscall_r_unmap() {
+    let req = syscall::unpack_r_unmap();
+    let result = RD_TABLE.lock(|rd_table| {
+        let mut rd_table = rd_table.borrow_mut();
+        rd_table
+            .try_remove(req.desc as usize)
+            .map(|_| 0)
+            .unwrap_or(-1)
+    });
+    syscall::pack_response(SyscallNum::RUnmap, result);
+    kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
+}
+
+fn syscall_r_sync() {
+    let req = syscall::unpack_r_sync();
+    let result = RD_TABLE.lock(|rd_table| {
         let rd_table = rd_table.borrow_mut();
-        let rd_ref = *rd_table.get(desc as usize).unwrap();
+        let rd_ref = *rd_table.get(req.desc as usize).unwrap();
         match rd_ref.fd {
             FileDescriptor::DisplayChar => {
                 FLUSH_CHAR_DISPLAY_SIG.signal(rd_ref);
@@ -234,42 +278,34 @@ extern "C" fn abi_r_sync(desc: isize) -> isize {
             }
             _ => -1,
         }
-    })
+    });
+    syscall::pack_response(SyscallNum::RSync, result);
+    kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
 }
 
-extern "C" fn abi_r_unmap(desc: isize) -> isize {
-    RD_TABLE.lock(|rd_table| {
-        let mut rd_table = rd_table.borrow_mut();
-        rd_table.try_remove(desc as usize).map(|_| 0).unwrap_or(-1)
-    })
-}
-
-extern "C" fn abi_ioctl(
-    fd: FileDescriptor,
-    op: usize,
-    in_arg: *const c_void,
-    out_arg: *mut c_void,
-) -> ErrNo {
-    match fd {
+fn syscall_ioctl() {
+    let req = syscall::unpack_ioctl();
+    match req.fd {
         FileDescriptor::Display => {
-            let disp_op = DisplayOperation::try_from(op).unwrap();
+            let disp_op = DisplayOperation::try_from(req.op).unwrap();
             match disp_op {
                 DisplayOperation::GetStat => unsafe {
-                    *(out_arg as *mut DisplayStat) = DISPLAY_STAT;
+                    *(req.out_arg as *mut DisplayStat) = DISPLAY_STAT;
                 },
             }
         }
         FileDescriptor::DisplayChar => {
-            let disp_op = DisplayCharOperation::try_from(op).unwrap();
+            let disp_op = DisplayCharOperation::try_from(req.op).unwrap();
             match disp_op {
                 DisplayCharOperation::GetStat => unsafe {
-                    *(out_arg as *mut DisplayCharStat) = DISPLAY_CHAR_STAT;
+                    *(req.out_arg as *mut DisplayCharStat) = DISPLAY_CHAR_STAT;
                 },
             }
         }
         _ => todo!(),
     }
-    errno::OK
+    syscall::pack_response(SyscallNum::IoCtl, errno::OK);
+    kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
 }
 
 pub async fn kernel_entry(r: DisplayResources) -> ! {
@@ -302,15 +338,37 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
     APP_LAUNCH_SIG.signal(get_shell_app_entry());
     cortex_m::asm::sev();
 
-    loop {
-        defmt::debug!("waiting for next display flush");
-        let rd_ref = FLUSH_CHAR_DISPLAY_SIG.wait().await;
-        let buff: &[CharCell] =
-            unsafe { from_raw_parts(rd_ref.raw_ptr.as_ptr() as *const CharCell, rd_ref.len) };
-        display.flush_char(buff).await;
-        FLUSH_CHAR_DISPLAY_DONE_SIG.signal(());
-        defmt::debug!("done display flush");
-    }
+    let mut display_loop = async || {
+        loop {
+            defmt::debug!("waiting for next display flush");
+            let rd_ref = FLUSH_CHAR_DISPLAY_SIG.wait().await;
+            let buff: &[CharCell] =
+                unsafe { from_raw_parts(rd_ref.raw_ptr.as_ptr() as *const CharCell, rd_ref.len) };
+            display.flush_char(buff).await;
+            FLUSH_CHAR_DISPLAY_DONE_SIG.signal(());
+            defmt::debug!("done display flush");
+        }
+    };
+    let kcom_loop = async || {
+        loop {
+            // XXX just assume syscall, since it's the only request
+            let _ = KCOM_REQ.wait().await;
+            let syscall_num = syscall::unpack_num().expect("unexpected syscall number");
+            match syscall_num {
+                SyscallNum::Null => {
+                    defmt::debug!("got syscall NULL, ignoring");
+                }
+                SyscallNum::Exit => syscall_exit(),
+                SyscallNum::Read => syscall_read(),
+                SyscallNum::RMap => syscall_r_map(),
+                SyscallNum::RUnmap => syscall_r_unmap(),
+                SyscallNum::RSync => syscall_r_sync(),
+                SyscallNum::IoCtl => syscall_ioctl(),
+            }
+        }
+    };
+    join(display_loop(), kcom_loop()).await;
+    unreachable!()
 }
 
 async fn usb_entry(r: UsbResources) {
@@ -384,15 +442,13 @@ fn user_process_supervisor() -> ! {
 
     defmt::debug!("starting user process supervisor");
     loop {
-        RD_TABLE.lock(|rd| rd.borrow_mut().clear()); // TODO should be a kernel task
-
         if let Some(app_entry) = APP_LAUNCH_SIG.try_take() {
+            RD_TABLE.lock(|rd| rd.borrow_mut().clear()); // TODO should be a kernel task
+            syscall::zero_syscall_data(); // TODO should be a kernel task
+
             defmt::debug!("core1 received new app entry, launching...");
             APP_EXIT_SIG.reset();
-            let exit_code = app_entry(&KERNEL_ABI as *const KernelAbi);
-            defmt::info!("core1 process finished, got exit code '{}'", exit_code);
-            APP_EXIT_SIG.signal(exit_code);
-            defmt::debug!("parking core1, until new app is launched");
+            app_entry();
         }
         cortex_m::asm::wfe();
     }
@@ -407,7 +463,19 @@ fn main() -> ! {
         p.CORE1,
         // TODO replace addr_of_mut with newer implementation
         unsafe { &mut *addr_of_mut!(APP_STACK) },
-        move || user_process_supervisor(),
+        move || {
+            use embassy_rp::interrupt;
+            use embassy_rp::interrupt::InterruptExt;
+            // disable embassy interrupts on core1,
+            // required for kernel message parsing.
+            interrupt::SIO_IRQ_PROC1.disable();
+            // TODO: replace with below when switching to RP235x
+            //embassy_rp::interrupt::SIO_IRQ_FIFO.disable();
+
+            k_signal_user_restart_setup();
+
+            user_process_supervisor()
+        },
     );
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| spawner.spawn(core0_task(r).unwrap()))
@@ -415,6 +483,10 @@ fn main() -> ! {
 
 #[embassy_executor::task]
 async fn core0_task(r: AssignedResources) {
+    use embassy_rp::interrupt;
+    use embassy_rp::interrupt::InterruptExt;
+    // NOTE I think this could be accomplished in bind_interrupts?
+    unsafe { interrupt::SIO_IRQ_PROC0.enable() };
     defmt::debug!("kernel entry");
     join(kernel_entry(r.display), usb_entry(r.usb)).await;
 }

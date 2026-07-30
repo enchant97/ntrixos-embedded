@@ -65,7 +65,7 @@ pub fn entrypoint(args: TokenStream, item: TokenStream) -> TokenStream {
 
     if user_fn.sig.asyncness.is_some() {
         return Error::new_spanned(
-            &user_fn.sig.asyncness,
+            user_fn.sig.asyncness,
             "#[entrypoint] function must not be async \
              (core1 runs as raw-thread executor)",
         )
@@ -80,13 +80,12 @@ pub fn entrypoint(args: TokenStream, item: TokenStream) -> TokenStream {
         #[doc(hidden)]
         #[unsafe(no_mangle)]
         #[unsafe(link_section = ".text._start")]
-        pub extern "C" fn _start(abi: *const ::libsys::sdk::KernelAbi) -> ::libsys::sdk::errno::ErrNo {
+        pub extern "C" fn _start() -> ! {
             unsafe {
                 ::libsys::mem::init_memory();
             }
-            ::libsys::core::sys_init(abi);
             #user_fn_ident();
-            ::libsys::sdk::errno::OK
+            ::libsys::process::exit(::libsys::sdk::errno::OK)
         }
     }
     .into()

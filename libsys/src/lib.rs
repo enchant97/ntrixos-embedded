@@ -1,12 +1,12 @@
 #![no_std]
 
 pub mod char_display;
-pub mod core;
 pub mod display;
 pub mod fd;
 pub mod keyboard;
 pub mod mem;
 pub mod process;
+mod syscall;
 pub mod terminal;
 
 pub use libsys_macros::{char_cells, entrypoint};

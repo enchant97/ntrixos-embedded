@@ -1,12 +1,13 @@
 use sdk::errno::{self, ErrNo};
 
-use crate::core::abi;
+use crate::syscall;
 
 /// Exit the program with given exit code.
 pub fn exit(code: ErrNo) -> ! {
-    (abi().exit)(code)
+    syscall::req_exit(code)
 }
 /// Exit the program with generic error code.
+#[inline(always)]
 pub fn abort() -> ! {
-    (abi().exit)(errno::GENERAL)
+    exit(errno::GENERAL)
 }

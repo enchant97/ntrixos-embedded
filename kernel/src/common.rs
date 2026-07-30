@@ -1,12 +1,12 @@
 //! Commonly used misc functions and types
 use core::ptr::NonNull;
 
-use sdk::{FileDescriptor, KernelAbi, errno::ErrNo};
+use sdk::FileDescriptor;
 
 /// A runnable user app entry function.
 ///
 /// Either points to a location in user apps flash or user memory.
-pub type AppEntry = extern "C" fn(*const KernelAbi) -> ErrNo;
+pub type AppEntry = extern "C" fn() -> !;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RawPtr(pub NonNull<u8>);
