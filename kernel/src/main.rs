@@ -12,6 +12,7 @@ use defmt_rtt as _;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDeviceWithConfig;
 use embassy_executor::Executor;
 use embassy_futures::join::join;
+use embassy_rp::interrupt;
 use embassy_rp::peripherals::{DMA_CH1, SPI0, USB};
 use embassy_rp::spinlock_mutex::blocking_mutex::SpinlockMutex;
 use embassy_rp::{
@@ -29,14 +30,14 @@ use sdk::drivers::display::{
     CharCell, DisplayCharOperation, DisplayCharStat, DisplayOperation, DisplayStat,
 };
 use sdk::errno::{self, ErrNo};
-use sdk::{FileDescriptor, KernelAbi};
+use sdk::{FileDescriptor, KernelAbi, kcom};
 use static_cell::StaticCell;
 use tryslab::Slab;
 use tryslab::heapless::DequeSlab;
 
 use crate::common::{AppEntry, RawPtr, RdTableEntry};
 use crate::drivers::display::{DISPLAY_CHAR_STAT, DISPLAY_STAT, DisplayDriver};
-use crate::memory::get_shell_app_entry;
+use crate::memory::{get_shell_app_entry, read_kcom_fifo_blocking, write_kcom_fifo_blocking};
 
 mod common;
 mod drivers;
@@ -83,6 +84,18 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
 static mut APP_STACK: Stack<4096> = Stack::new();
 static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
+
+static KCOM_REQ: Signal<CriticalSectionRawMutex, kcom::KComType> = Signal::new();
+
+#[interrupt]
+unsafe fn SIO_IRQ_PROC0() {
+    let sio = embassy_rp::pac::SIO;
+    sio.fifo().st().write(|w| w.set_wof(false)); // ack overflow flag
+    while sio.fifo().st().read().vld() {
+        let kcom_type = read_kcom_fifo_blocking().unwrap();
+        KCOM_REQ.signal(kcom_type);
+    }
+}
 
 pub static KERNEL_ABI: KernelAbi = KernelAbi {
     get_version: abi_get_version,
@@ -302,15 +315,27 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
     APP_LAUNCH_SIG.signal(get_shell_app_entry());
     cortex_m::asm::sev();
 
-    loop {
-        defmt::debug!("waiting for next display flush");
-        let rd_ref = FLUSH_CHAR_DISPLAY_SIG.wait().await;
-        let buff: &[CharCell] =
-            unsafe { from_raw_parts(rd_ref.raw_ptr.as_ptr() as *const CharCell, rd_ref.len) };
-        display.flush_char(buff).await;
-        FLUSH_CHAR_DISPLAY_DONE_SIG.signal(());
-        defmt::debug!("done display flush");
-    }
+    let mut display_loop = async || {
+        loop {
+            defmt::debug!("waiting for next display flush");
+            let rd_ref = FLUSH_CHAR_DISPLAY_SIG.wait().await;
+            let buff: &[CharCell] =
+                unsafe { from_raw_parts(rd_ref.raw_ptr.as_ptr() as *const CharCell, rd_ref.len) };
+            display.flush_char(buff).await;
+            FLUSH_CHAR_DISPLAY_DONE_SIG.signal(());
+            defmt::debug!("done display flush");
+        }
+    };
+    let kcom_loop = async || {
+        loop {
+            let kcom_type = KCOM_REQ.wait().await;
+            // TODO implement syscalls
+            defmt::debug!("KCOM_REQ '{:?}'", kcom_type as u32);
+            write_kcom_fifo_blocking(kcom_type);
+        }
+    };
+    join(display_loop(), kcom_loop()).await;
+    unreachable!()
 }
 
 async fn usb_entry(r: UsbResources) {
@@ -407,7 +432,17 @@ fn main() -> ! {
         p.CORE1,
         // TODO replace addr_of_mut with newer implementation
         unsafe { &mut *addr_of_mut!(APP_STACK) },
-        move || user_process_supervisor(),
+        move || {
+            use embassy_rp::interrupt;
+            use embassy_rp::interrupt::InterruptExt;
+            // disable embassy interrupts on core1,
+            // required for kernel message parsing.
+            interrupt::SIO_IRQ_PROC1.disable();
+            // TODO: replace with below when switching to RP235x
+            //embassy_rp::interrupt::SIO_IRQ_FIFO.disable();
+
+            user_process_supervisor()
+        },
     );
     let executor0 = EXECUTOR0.init(Executor::new());
     executor0.run(|spawner| spawner.spawn(core0_task(r).unwrap()))
@@ -415,6 +450,11 @@ fn main() -> ! {
 
 #[embassy_executor::task]
 async fn core0_task(r: AssignedResources) {
+    use embassy_rp::interrupt;
+    use embassy_rp::interrupt::InterruptExt;
+    // NOTE I think this could be accomplished in bind_interrupts?
+    unsafe { interrupt::SIO_IRQ_PROC0.enable() };
+
     defmt::debug!("kernel entry");
     join(kernel_entry(r.display), usb_entry(r.usb)).await;
 }

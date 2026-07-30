@@ -4,6 +4,7 @@ use core::ffi::c_void;
 
 pub mod drivers;
 pub mod errno;
+pub mod kcom;
 
 #[repr(C)]
 #[derive(PartialEq, Clone, Copy, Debug)]

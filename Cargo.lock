@@ -605,7 +605,7 @@ dependencies = [
  "rand_core 0.10.1",
  "rand_core 0.6.4",
  "rand_core 0.9.5",
- "rp-pac",
+ "rp-pac 7.0.0 (git+https://github.com/embassy-rs/rp-pac?rev=c2e27609b021c444f634673155318977d7f0bdf6)",
  "rp2040-boot2",
  "sha2-const-stable",
  "smart-leds",
@@ -1033,6 +1033,7 @@ dependencies = [
  "embassy-usb-host",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "num_enum",
  "portable-atomic",
  "sdk",
  "static_cell",
@@ -1094,11 +1095,14 @@ name = "libsys"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "cortex-m",
  "embassy-sync",
  "heapless 0.9.3",
  "libsys-macros",
  "nostd",
+ "num_enum",
  "portable-atomic",
+ "rp-pac 7.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sdk",
 ]
 
@@ -1508,6 +1512,15 @@ name = "rgb"
 version = "0.8.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+
+[[package]]
+name = "rp-pac"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8af65855c40b2c35079514c5489abffc0429347fef25d8467ff98ad84b4322d3"
+dependencies = [
+ "cortex-m",
+]
 
 [[package]]
 name = "rp-pac"

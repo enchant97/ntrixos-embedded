@@ -3,6 +3,9 @@ ENTRY(_start)
 MEMORY {
     FLASH : ORIGIN = 0x10040000, LENGTH = 1792K
     RAM : ORIGIN = 0x20020000, LENGTH = 128K
+    /* Shared memory for storing Syscall message */
+    /* NOTE: not all 4K is actually used */
+    SYSCALL_MSG : ORIGIN = 0x20040000, LENGTH = 4K
 }
 
 SECTIONS
@@ -38,4 +41,8 @@ SECTIONS
         *(.ARM.extab*)
         *(.ARM.attributes*)
     }
+
+    .syscall_message : {
+        KEEP(*(.syscall_message))
+    } > SYSCALL_MSG
 }
