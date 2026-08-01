@@ -12,6 +12,3 @@ bytemuck = { version = "1.25" }
 num_enum = { version = "0.7.6", default-features = false }
 heapless = "0.9"
 portable-atomic = { version = "1.14", default-features = false, features = ["unsafe-assume-single-core"] }
-
-rp-pac = { version  = "7.0.0", features = ["rp2040"]}
-cortex-m = { version = "0.7.6", features = ["inline-asm"] }

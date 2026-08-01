@@ -5,6 +5,7 @@ use core::ffi::c_void;
 pub mod drivers;
 pub mod errno;
 pub mod kcom;
+pub mod syscall;
 
 #[repr(C)]
 #[derive(PartialEq, Clone, Copy, Debug)]

@@ -37,7 +37,7 @@ use tryslab::heapless::DequeSlab;
 
 use crate::common::{AppEntry, RawPtr, RdTableEntry};
 use crate::drivers::display::{DISPLAY_CHAR_STAT, DISPLAY_STAT, DisplayDriver};
-use crate::memory::{get_shell_app_entry, read_kcom_fifo_blocking, write_kcom_fifo_blocking};
+use crate::memory::get_shell_app_entry;
 use crate::signaling::{
     k_signal_user_restart, k_signal_user_restart_reset, k_signal_user_restart_setup,
 };
@@ -96,7 +96,7 @@ unsafe fn SIO_IRQ_PROC0() {
     let sio = embassy_rp::pac::SIO;
     sio.fifo().st().write(|w| w.set_wof(false)); // ack overflow flag
     while sio.fifo().st().read().vld() {
-        let kcom_type = read_kcom_fifo_blocking().unwrap();
+        let kcom_type = kcom::read_kcom_fifo_blocking().unwrap();
         KCOM_REQ.signal(kcom_type);
     }
 }
@@ -368,7 +368,7 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
             let kcom_type = KCOM_REQ.wait().await;
             // TODO implement syscalls
             defmt::debug!("KCOM_REQ '{:?}'", kcom_type as u32);
-            write_kcom_fifo_blocking(kcom_type);
+            kcom::write_kcom_fifo_blocking(kcom_type);
         }
     };
     join(display_loop(), kcom_loop()).await;

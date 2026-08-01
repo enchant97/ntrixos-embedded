@@ -1,7 +1,3 @@
-use num_enum::TryFromPrimitive;
-use rp_pac::SIO;
-use sdk::kcom::{KComType, Syscall};
-
 // Symbols injected by the linker script
 unsafe extern "C" {
     static mut _data_start: u32;
@@ -9,20 +5,6 @@ unsafe extern "C" {
     static _data_load: u32; // LMA — read only, lives in flash
     static mut _bss_start: u32;
     static mut _bss_end: u32;
-}
-
-#[unsafe(link_section = ".syscall_message")]
-pub(crate) static SYSCALL_MESSAGE: Syscall = Syscall::empty();
-
-pub fn write_kcom_fifo_blocking(kcom_type: KComType) {
-    let word = kcom_type as u32;
-    SIO.fifo().wr().write_value(word);
-    cortex_m::asm::sev();
-}
-
-pub fn read_kcom_fifo_blocking() -> Option<KComType> {
-    let word = SIO.fifo().rd().read();
-    KComType::try_from_primitive(word).ok()
 }
 
 /// Init the app memory, called once on program start.

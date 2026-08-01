@@ -5,7 +5,6 @@ use libsys::{
     char_cells,
     char_display::CharDisplay,
     entrypoint,
-    mem::write_kcom_fifo_blocking,
     process::exit,
     sdk::{
         drivers::{
@@ -21,8 +20,6 @@ static mut CHAR_BUFFER: [CharCell; 15 * 20] = [CharCell::from_u8_lossy(0); 15 * 
 
 #[entrypoint]
 pub fn app_entry() {
-    write_kcom_fifo_blocking(libsys::sdk::kcom::KComType::Syscall);
-
     libsys::keyboard::keyboard().lock(|kb| {
         let char_display = CharDisplay::init().unwrap();
         let mut char_buffer = unsafe { char_display.register_buffer(&mut CHAR_BUFFER).unwrap() };

@@ -1,5 +1,5 @@
 use num_enum::TryFromPrimitive;
-use portable_atomic::{AtomicIsize, AtomicUsize};
+use rp_pac::SIO;
 
 /// Type of Kernel Communication Message
 #[derive(PartialEq, Clone, Copy, Debug, TryFromPrimitive)]
@@ -8,35 +8,13 @@ pub enum KComType {
     Syscall = 0,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, TryFromPrimitive)]
-#[repr(usize)]
-pub enum SyscallNum {
-    Null = 0,
-    Exit,
-    Write,
-    Read,
-    Flush,
-    Seek,
-    RMap,
-    RSync,
-    RUnmap,
-    IoCtl,
+pub fn write_kcom_fifo_blocking(kcom_type: KComType) {
+    let word = kcom_type as u32;
+    SIO.fifo().wr().write_value(word);
+    cortex_m::asm::sev();
 }
 
-#[derive(Debug)]
-#[repr(C)]
-pub struct Syscall {
-    pub num: AtomicUsize,
-    pub args: [AtomicUsize; 6],
-    pub result: AtomicIsize,
-}
-
-impl Syscall {
-    pub const fn empty() -> Self {
-        Self {
-            num: AtomicUsize::new(SyscallNum::Null as usize),
-            args: [const { AtomicUsize::new(0) }; 6],
-            result: AtomicIsize::new(isize::MIN),
-        }
-    }
+pub fn read_kcom_fifo_blocking() -> Option<KComType> {
+    let word = SIO.fifo().rd().read();
+    KComType::try_from_primitive(word).ok()
 }
