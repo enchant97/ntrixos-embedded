@@ -38,10 +38,14 @@ use tryslab::heapless::DequeSlab;
 use crate::common::{AppEntry, RawPtr, RdTableEntry};
 use crate::drivers::display::{DISPLAY_CHAR_STAT, DISPLAY_STAT, DisplayDriver};
 use crate::memory::{get_shell_app_entry, read_kcom_fifo_blocking, write_kcom_fifo_blocking};
+use crate::signaling::{
+    k_signal_user_restart, k_signal_user_restart_reset, k_signal_user_restart_setup,
+};
 
 mod common;
 mod drivers;
 mod memory;
+mod signaling;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -95,6 +99,47 @@ unsafe fn SIO_IRQ_PROC0() {
         let kcom_type = read_kcom_fifo_blocking().unwrap();
         KCOM_REQ.signal(kcom_type);
     }
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn TIMER_IRQ_3() {
+    // perform exception return, by building frame.
+    core::arch::naked_asm!(
+        "mov r4, lr",
+        "mov r0, sp",
+        "bl {handler}",
+        "mov sp, r0",
+        "bx r4",
+        handler = sym build_restart_frame,
+    )
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn build_restart_frame(_old_frame: u32) -> u32 {
+    k_signal_user_restart_reset();
+
+    let code = -1; // TODO get real exit code
+    APP_EXIT_SIG.signal(code);
+    if !APP_LAUNCH_SIG.signaled() {
+        // TODO this should be a kernel task
+        // TODO memory is not reset
+        APP_LAUNCH_SIG.signal(get_shell_app_entry());
+    }
+
+    let supervisor_sp = APP_SUPERVISOR_SP.load(Ordering::Acquire);
+    let frame_base = (supervisor_sp - 32) as *mut u32;
+    unsafe {
+        core::ptr::write_volatile(frame_base.add(0), 0); // r0
+        core::ptr::write_volatile(frame_base.add(1), 0); // r1
+        core::ptr::write_volatile(frame_base.add(2), 0); // r2
+        core::ptr::write_volatile(frame_base.add(3), 0); // r3
+        core::ptr::write_volatile(frame_base.add(4), 0); // r12
+        core::ptr::write_volatile(frame_base.add(5), 0); // LR (unused, supervisor never "returns")
+        core::ptr::write_volatile(frame_base.add(6), user_process_supervisor as u32); // return PC
+        core::ptr::write_volatile(frame_base.add(7), 0x0100_0000); // xPSR, T-bit set
+    }
+    frame_base as u32
 }
 
 pub static KERNEL_ABI: KernelAbi = KernelAbi {
@@ -153,26 +198,18 @@ bind_interrupts!(struct Irqs{
     USBCTRL_IRQ => embassy_rp::usb::host::InterruptHandler<USB>;
 });
 
+fn syscall_exit() {
+    k_signal_user_restart();
+}
+
 extern "C" fn abi_get_version() -> u32 {
     1
 }
 
 extern "C" fn abi_exit(code: ErrNo) -> ! {
-    APP_EXIT_SIG.signal(code);
-    if !APP_LAUNCH_SIG.signaled() {
-        // TODO this should be a kernel task
-        // TODO memory is not reset
-        APP_LAUNCH_SIG.signal(get_shell_app_entry());
-    }
-    let sp = APP_SUPERVISOR_SP.load(Ordering::Acquire);
-    unsafe {
-        core::arch::asm!(
-        "mov sp, {sp}",
-        "bx {resume}",
-        sp=in(reg) sp,
-        resume = in(reg) user_process_supervisor as u32 | 1,
-        options(noreturn)
-        );
+    syscall_exit(); // TODO move this to kernel call
+    loop {
+        cortex_m::asm::wfe();
     }
 }
 
@@ -440,6 +477,8 @@ fn main() -> ! {
             interrupt::SIO_IRQ_PROC1.disable();
             // TODO: replace with below when switching to RP235x
             //embassy_rp::interrupt::SIO_IRQ_FIFO.disable();
+
+            k_signal_user_restart_setup();
 
             user_process_supervisor()
         },
