@@ -13,8 +13,4 @@ static SHELL_FLASH: [u8; include_bytes!("../../../target/thumbv6m-none-eabi/bin/
     *include_bytes!("../../../target/thumbv6m-none-eabi/bin/shell.bin");
 
 #[unsafe(link_section = ".syscall_message")]
-pub static SYSCALL_MESSAGE: Syscall = Syscall {
-    num: SyscallNum::Null,
-    args: [0; 6],
-    result: 0,
-};
+pub static SYSCALL_MESSAGE: Syscall = Syscall::empty();

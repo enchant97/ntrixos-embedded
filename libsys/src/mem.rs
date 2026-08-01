@@ -12,11 +12,7 @@ unsafe extern "C" {
 }
 
 #[unsafe(link_section = ".syscall_message")]
-pub static SYSCALL_MESSAGE: Syscall = Syscall {
-    num: SyscallNum::Null,
-    args: [0; 6],
-    result: 0,
-};
+pub(crate) static SYSCALL_MESSAGE: Syscall = Syscall::empty();
 
 pub fn write_kcom_fifo_blocking(kcom_type: KComType) {
     let word = kcom_type as u32;

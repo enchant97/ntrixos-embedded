@@ -1,4 +1,5 @@
 use num_enum::TryFromPrimitive;
+use portable_atomic::{AtomicIsize, AtomicUsize};
 
 /// Type of Kernel Communication Message
 #[derive(PartialEq, Clone, Copy, Debug, TryFromPrimitive)]
@@ -25,7 +26,17 @@ pub enum SyscallNum {
 #[derive(Debug)]
 #[repr(C)]
 pub struct Syscall {
-    pub num: SyscallNum,
-    pub args: [usize; 6],
-    pub result: isize,
+    pub num: AtomicUsize,
+    pub args: [AtomicUsize; 6],
+    pub result: AtomicIsize,
+}
+
+impl Syscall {
+    pub const fn empty() -> Self {
+        Self {
+            num: AtomicUsize::new(SyscallNum::Null as usize),
+            args: [const { AtomicUsize::new(0) }; 6],
+            result: AtomicIsize::new(isize::MIN),
+        }
+    }
 }

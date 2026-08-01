@@ -1599,6 +1599,7 @@ dependencies = [
  "defmt",
  "ntrix-vdc-sdk",
  "num_enum",
+ "portable-atomic",
 ]
 
 [[package]]
