@@ -1,6 +1,6 @@
 use num_enum::TryFromPrimitive;
 use rp_pac::SIO;
-use sdk::kcom::{KComType, Syscall, SyscallNum};
+use sdk::kcom::{KComType, Syscall};
 
 // Symbols injected by the linker script
 unsafe extern "C" {
@@ -22,11 +22,7 @@ pub fn write_kcom_fifo_blocking(kcom_type: KComType) {
 
 pub fn read_kcom_fifo_blocking() -> Option<KComType> {
     let word = SIO.fifo().rd().read();
-    if let Ok(kcom_type) = KComType::try_from_primitive(word) {
-        Some(kcom_type)
-    } else {
-        None
-    }
+    KComType::try_from_primitive(word).ok()
 }
 
 /// Init the app memory, called once on program start.

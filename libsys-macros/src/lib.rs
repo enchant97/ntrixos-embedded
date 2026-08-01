@@ -65,7 +65,7 @@ pub fn entrypoint(args: TokenStream, item: TokenStream) -> TokenStream {
 
     if user_fn.sig.asyncness.is_some() {
         return Error::new_spanned(
-            &user_fn.sig.asyncness,
+            user_fn.sig.asyncness,
             "#[entrypoint] function must not be async \
              (core1 runs as raw-thread executor)",
         )

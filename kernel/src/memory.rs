@@ -23,9 +23,5 @@ pub fn write_kcom_fifo_blocking(kcom_type: KComType) {
 
 pub fn read_kcom_fifo_blocking() -> Option<KComType> {
     let word = SIO.fifo().rd().read();
-    if let Ok(kcom_type) = KComType::try_from_primitive(word) {
-        Some(kcom_type)
-    } else {
-        None
-    }
+    KComType::try_from_primitive(word).ok()
 }

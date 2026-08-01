@@ -1,5 +1,5 @@
 //! Values provided by the linker.
-use sdk::kcom::{Syscall, SyscallNum};
+use sdk::kcom::Syscall;
 
 unsafe extern "C" {
     pub static __shell_flash_start: u32;
