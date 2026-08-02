@@ -15,6 +15,18 @@ pub fn write_kcom_fifo_blocking(kcom_type: KComType) {
 }
 
 pub fn read_kcom_fifo_blocking() -> Option<KComType> {
+    while !SIO.fifo().st().read().vld() {
+        cortex_m::asm::wfe();
+    }
+    let word = SIO.fifo().rd().read();
+    KComType::try_from_primitive(word).ok()
+}
+
+/// Read direct from FIFO without checking status.
+///
+/// # Safety
+/// Without external handling, may return stale/repeated values.
+pub unsafe fn read_kcom_fifo_unchecked() -> Option<KComType> {
     let word = SIO.fifo().rd().read();
     KComType::try_from_primitive(word).ok()
 }

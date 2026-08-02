@@ -1095,6 +1095,7 @@ name = "libsys"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "cortex-m",
  "embassy-sync",
  "heapless 0.9.3",
  "libsys-macros",
@@ -1598,7 +1599,6 @@ dependencies = [
  "defmt",
  "ntrix-vdc-sdk",
  "num_enum",
- "portable-atomic",
  "rp-pac 7.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

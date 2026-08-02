@@ -7,6 +7,7 @@ pub mod fd;
 pub mod keyboard;
 pub mod mem;
 pub mod process;
+mod syscall;
 pub mod terminal;
 
 pub use libsys_macros::{char_cells, entrypoint};

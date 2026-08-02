@@ -42,7 +42,8 @@ SECTIONS
         *(.ARM.attributes*)
     }
 
-    .syscall_message : {
-        KEEP(*(.syscall_message))
+    .syscall_message (NOLOAD) : {
+        SYSCALL_MESSAGE = .;
+        . += 32; /* sizeof(Syscall) */
     } > SYSCALL_MSG
 }

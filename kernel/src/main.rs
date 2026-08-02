@@ -30,6 +30,7 @@ use sdk::drivers::display::{
     CharCell, DisplayCharOperation, DisplayCharStat, DisplayOperation, DisplayStat,
 };
 use sdk::errno::{self, ErrNo};
+use sdk::syscall::SyscallNum;
 use sdk::{FileDescriptor, KernelAbi, kcom};
 use static_cell::StaticCell;
 use tryslab::Slab;
@@ -46,6 +47,7 @@ mod common;
 mod drivers;
 mod memory;
 mod signaling;
+mod syscall;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -96,7 +98,7 @@ unsafe fn SIO_IRQ_PROC0() {
     let sio = embassy_rp::pac::SIO;
     sio.fifo().st().write(|w| w.set_wof(false)); // ack overflow flag
     while sio.fifo().st().read().vld() {
-        let kcom_type = kcom::read_kcom_fifo_blocking().unwrap();
+        let kcom_type = unsafe { kcom::read_kcom_fifo_unchecked().unwrap() };
         KCOM_REQ.signal(kcom_type);
     }
 }
@@ -144,7 +146,6 @@ extern "C" fn build_restart_frame(_old_frame: u32) -> u32 {
 
 pub static KERNEL_ABI: KernelAbi = KernelAbi {
     get_version: abi_get_version,
-    exit: abi_exit,
     write: abi_write,
     read: abi_read,
     flush: abi_flush,
@@ -198,19 +199,12 @@ bind_interrupts!(struct Irqs{
     USBCTRL_IRQ => embassy_rp::usb::host::InterruptHandler<USB>;
 });
 
-fn syscall_exit() {
+fn syscall_exit(code: ErrNo) {
     k_signal_user_restart();
 }
 
 extern "C" fn abi_get_version() -> u32 {
     1
-}
-
-extern "C" fn abi_exit(code: ErrNo) -> ! {
-    syscall_exit(); // TODO move this to kernel call
-    loop {
-        cortex_m::asm::wfe();
-    }
 }
 
 extern "C" fn abi_write(fd: FileDescriptor, buff: *const u8, buff_len: usize) {
@@ -365,10 +359,19 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
     };
     let kcom_loop = async || {
         loop {
-            let kcom_type = KCOM_REQ.wait().await;
-            // TODO implement syscalls
-            defmt::debug!("KCOM_REQ '{:?}'", kcom_type as u32);
-            kcom::write_kcom_fifo_blocking(kcom_type);
+            // XXX just assume syscall, since it's the only request
+            let _ = KCOM_REQ.wait().await;
+            let syscall_num = syscall::unpack_num().expect("unexpected syscall number");
+            match syscall_num {
+                SyscallNum::Null => {
+                    defmt::debug!("got syscall NULL, ignoring");
+                }
+                SyscallNum::Exit => {
+                    let code = syscall::unpack_exit_args();
+                    syscall_exit(code);
+                }
+                _ => todo!(),
+            }
         }
     };
     join(display_loop(), kcom_loop()).await;
@@ -447,6 +450,7 @@ fn user_process_supervisor() -> ! {
     defmt::debug!("starting user process supervisor");
     loop {
         RD_TABLE.lock(|rd| rd.borrow_mut().clear()); // TODO should be a kernel task
+        syscall::zero_syscall_data(); // TODO should be a kernel task
 
         if let Some(app_entry) = APP_LAUNCH_SIG.try_take() {
             defmt::debug!("core1 received new app entry, launching...");
@@ -493,7 +497,6 @@ async fn core0_task(r: AssignedResources) {
     use embassy_rp::interrupt::InterruptExt;
     // NOTE I think this could be accomplished in bind_interrupts?
     unsafe { interrupt::SIO_IRQ_PROC0.enable() };
-
     defmt::debug!("kernel entry");
     join(kernel_entry(r.display), usb_entry(r.usb)).await;
 }
