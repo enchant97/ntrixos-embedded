@@ -21,9 +21,3 @@ pub(crate) fn abi() -> &'static KernelAbi {
         &*ABI_PTR
     }
 }
-
-/// Get the current version of the kernel abi.
-#[must_use]
-pub fn get_abi_version() -> u32 {
-    (abi().get_version)()
-}

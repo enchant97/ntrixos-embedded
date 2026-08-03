@@ -145,7 +145,6 @@ extern "C" fn build_restart_frame(_old_frame: u32) -> u32 {
 }
 
 pub static KERNEL_ABI: KernelAbi = KernelAbi {
-    get_version: abi_get_version,
     write: abi_write,
     read: abi_read,
     flush: abi_flush,
@@ -201,10 +200,6 @@ bind_interrupts!(struct Irqs{
 
 fn syscall_exit(code: ErrNo) {
     k_signal_user_restart();
-}
-
-extern "C" fn abi_get_version() -> u32 {
-    1
 }
 
 extern "C" fn abi_write(fd: FileDescriptor, buff: *const u8, buff_len: usize) {

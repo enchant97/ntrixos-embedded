@@ -17,7 +17,6 @@ pub enum FileDescriptor {
 
 #[repr(C)]
 pub struct KernelAbi {
-    pub get_version: extern "C" fn() -> u32,
     /// Write directly to the given file descriptor.
     pub write: extern "C" fn(fd: FileDescriptor, buff: *const u8, buff_len: usize),
     /// Read directly from given file descriptor.
