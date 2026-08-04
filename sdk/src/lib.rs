@@ -14,6 +14,3 @@ pub enum FileDescriptor {
     Display,
     DisplayChar,
 }
-
-#[repr(C)]
-pub struct KernelAbi {}

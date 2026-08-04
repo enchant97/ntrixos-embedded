@@ -30,7 +30,7 @@ use sdk::drivers::display::{
 };
 use sdk::errno::{self, ErrNo};
 use sdk::syscall::SyscallNum;
-use sdk::{FileDescriptor, KernelAbi, kcom};
+use sdk::{FileDescriptor, kcom};
 use static_cell::StaticCell;
 use tryslab::Slab;
 use tryslab::heapless::DequeSlab;
@@ -142,8 +142,6 @@ extern "C" fn build_restart_frame(_old_frame: u32) -> u32 {
     }
     frame_base as u32
 }
-
-pub static KERNEL_ABI: KernelAbi = KernelAbi {};
 
 /// Used to get back to the app supervisor to launch/relaunch app.
 static APP_SUPERVISOR_SP: AtomicU32 = AtomicU32::new(0);
@@ -444,16 +442,13 @@ fn user_process_supervisor() -> ! {
 
     defmt::debug!("starting user process supervisor");
     loop {
-        RD_TABLE.lock(|rd| rd.borrow_mut().clear()); // TODO should be a kernel task
-        syscall::zero_syscall_data(); // TODO should be a kernel task
-
         if let Some(app_entry) = APP_LAUNCH_SIG.try_take() {
+            RD_TABLE.lock(|rd| rd.borrow_mut().clear()); // TODO should be a kernel task
+            syscall::zero_syscall_data(); // TODO should be a kernel task
+
             defmt::debug!("core1 received new app entry, launching...");
             APP_EXIT_SIG.reset();
-            let exit_code = app_entry(&KERNEL_ABI as *const KernelAbi);
-            defmt::info!("core1 process finished, got exit code '{}'", exit_code);
-            APP_EXIT_SIG.signal(exit_code);
-            defmt::debug!("parking core1, until new app is launched");
+            app_entry();
         }
         cortex_m::asm::wfe();
     }
