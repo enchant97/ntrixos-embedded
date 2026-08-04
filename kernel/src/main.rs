@@ -4,7 +4,6 @@
 
 use assign_resources::assign_resources;
 use core::cell::RefCell;
-use core::ffi::c_void;
 use core::ptr::{NonNull, addr_of_mut};
 use core::slice::from_raw_parts;
 use core::sync::atomic::Ordering;
@@ -144,13 +143,7 @@ extern "C" fn build_restart_frame(_old_frame: u32) -> u32 {
     frame_base as u32
 }
 
-pub static KERNEL_ABI: KernelAbi = KernelAbi {
-    write: abi_write,
-    read: abi_read,
-    flush: abi_flush,
-    seek: abi_seek,
-    ioctl: abi_ioctl,
-};
+pub static KERNEL_ABI: KernelAbi = KernelAbi {};
 
 /// Used to get back to the app supervisor to launch/relaunch app.
 static APP_SUPERVISOR_SP: AtomicU32 = AtomicU32::new(0);
@@ -199,6 +192,38 @@ fn syscall_exit() {
     // TODO use exit code
     let code = syscall::unpack_exit_args();
     k_signal_user_restart();
+}
+
+fn syscall_read() {
+    let req = syscall::unpack_read();
+    let result = match req.fd {
+        FileDescriptor::Display => -1,
+        FileDescriptor::DisplayChar => -1,
+        FileDescriptor::KeyEvents => {
+            use sdk::drivers::keyboard::KeyEvent;
+            if req.len < size_of::<KeyEvent>() {
+                // buffer too small
+                -1
+            } else {
+                // TODO this ignores a buffer with more than 1 event space
+                //      only ever returns 1 event
+                let event: KeyEvent;
+                loop {
+                    if let Ok(v) = KEYBOARD_EVENT_CHANNEL.try_receive() {
+                        event = v;
+                        break;
+                    }
+                    cortex_m::asm::wfe();
+                }
+                unsafe {
+                    (req.buf as *mut KeyEvent).write(event);
+                }
+                size_of::<KeyEvent>() as isize
+            }
+        }
+    };
+    syscall::pack_response(SyscallNum::Read, result);
+    kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
 }
 
 fn syscall_r_map() {
@@ -260,70 +285,29 @@ fn syscall_r_sync() {
     kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
 }
 
-extern "C" fn abi_write(fd: FileDescriptor, buff: *const u8, buff_len: usize) {
-    todo!()
-}
-
-extern "C" fn abi_read(fd: FileDescriptor, buff: *mut u8, buff_len: usize) -> isize {
-    match fd {
-        FileDescriptor::Display => -1,
-        FileDescriptor::DisplayChar => -1,
-        FileDescriptor::KeyEvents => {
-            use sdk::drivers::keyboard::KeyEvent;
-            if buff_len < size_of::<KeyEvent>() {
-                // buffer too small
-                return -1;
-            }
-            // TODO this ignores a buffer with more than 1 event space
-            //      only ever returns 1 event
-            let event: KeyEvent;
-            loop {
-                if let Ok(v) = KEYBOARD_EVENT_CHANNEL.try_receive() {
-                    event = v;
-                    break;
-                }
-                cortex_m::asm::wfe();
-            }
-            unsafe {
-                (buff as *mut KeyEvent).write(event);
-            }
-            size_of::<KeyEvent>() as isize
-        }
-    }
-}
-
-extern "C" fn abi_flush(fd: FileDescriptor) {}
-
-extern "C" fn abi_seek(fd: FileDescriptor, offset: usize) {
-    todo!()
-}
-
-extern "C" fn abi_ioctl(
-    fd: FileDescriptor,
-    op: usize,
-    in_arg: *const c_void,
-    out_arg: *mut c_void,
-) -> ErrNo {
-    match fd {
+fn syscall_ioctl() {
+    let req = syscall::unpack_ioctl();
+    match req.fd {
         FileDescriptor::Display => {
-            let disp_op = DisplayOperation::try_from(op).unwrap();
+            let disp_op = DisplayOperation::try_from(req.op).unwrap();
             match disp_op {
                 DisplayOperation::GetStat => unsafe {
-                    *(out_arg as *mut DisplayStat) = DISPLAY_STAT;
+                    *(req.out_arg as *mut DisplayStat) = DISPLAY_STAT;
                 },
             }
         }
         FileDescriptor::DisplayChar => {
-            let disp_op = DisplayCharOperation::try_from(op).unwrap();
+            let disp_op = DisplayCharOperation::try_from(req.op).unwrap();
             match disp_op {
                 DisplayCharOperation::GetStat => unsafe {
-                    *(out_arg as *mut DisplayCharStat) = DISPLAY_CHAR_STAT;
+                    *(req.out_arg as *mut DisplayCharStat) = DISPLAY_CHAR_STAT;
                 },
             }
         }
         _ => todo!(),
     }
-    errno::OK
+    syscall::pack_response(SyscallNum::IoCtl, errno::OK);
+    kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
 }
 
 pub async fn kernel_entry(r: DisplayResources) -> ! {
@@ -377,10 +361,11 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
                     defmt::debug!("got syscall NULL, ignoring");
                 }
                 SyscallNum::Exit => syscall_exit(),
+                SyscallNum::Read => syscall_read(),
                 SyscallNum::RMap => syscall_r_map(),
                 SyscallNum::RUnmap => syscall_r_unmap(),
                 SyscallNum::RSync => syscall_r_sync(),
-                _ => todo!(),
+                SyscallNum::IoCtl => syscall_ioctl(),
             }
         }
     };

@@ -1,10 +1,13 @@
-use core::sync::atomic::Ordering;
+use core::{ffi::c_void, sync::atomic::Ordering};
 
 use num_enum::TryFromPrimitive;
 use sdk::{
     FileDescriptor,
     errno::ErrNo,
-    syscall::{RMapSyscall, RSyncSyscall, RUnmapSyscall, SyscallNum, syscall_message},
+    syscall::{
+        IoCtlSyscall, RMapSyscall, RSyncSyscall, RUnmapSyscall, ReadSyscall, SyscallNum,
+        syscall_message,
+    },
 };
 
 pub fn zero_syscall_data() {
@@ -24,6 +27,15 @@ pub fn unpack_num() -> Result<SyscallNum, usize> {
 pub fn unpack_exit_args() -> ErrNo {
     let arg0 = syscall_message().args[0].load(Ordering::Relaxed);
     arg0 as isize
+}
+
+pub fn unpack_read() -> ReadSyscall {
+    let msg = syscall_message();
+    ReadSyscall {
+        fd: FileDescriptor::try_from_primitive(msg.args[0].load(Ordering::Relaxed)).unwrap(),
+        buf: msg.args[1].load(Ordering::Relaxed) as *mut u8,
+        len: msg.args[2].load(Ordering::Relaxed),
+    }
 }
 
 pub fn unpack_r_map() -> RMapSyscall {
@@ -46,6 +58,16 @@ pub fn unpack_r_unmap() -> RUnmapSyscall {
     let msg = syscall_message();
     RUnmapSyscall {
         desc: msg.args[0].load(Ordering::Relaxed) as isize,
+    }
+}
+
+pub fn unpack_ioctl() -> IoCtlSyscall {
+    let msg = syscall_message();
+    IoCtlSyscall {
+        fd: FileDescriptor::try_from_primitive(msg.args[0].load(Ordering::Relaxed)).unwrap(),
+        op: msg.args[1].load(Ordering::Relaxed),
+        in_arg: msg.args[2].load(Ordering::Relaxed) as *const c_void,
+        out_arg: msg.args[3].load(Ordering::Relaxed) as *mut c_void,
     }
 }
 
