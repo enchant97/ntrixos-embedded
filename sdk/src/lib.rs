@@ -1,14 +1,15 @@
 #![no_std]
 
 use core::ffi::c_void;
+use num_enum::TryFromPrimitive;
 
 pub mod drivers;
 pub mod errno;
 pub mod kcom;
 pub mod syscall;
 
-#[repr(C)]
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[repr(usize)]
+#[derive(PartialEq, Clone, Copy, Debug, TryFromPrimitive)]
 pub enum FileDescriptor {
     KeyEvents,
     Display,
@@ -27,9 +28,6 @@ pub struct KernelAbi {
     ///
     /// Only one cursor exists per file descriptor.
     pub seek: extern "C" fn(fd: FileDescriptor, offset: usize),
-    pub r_map: extern "C" fn(addr: *mut u8, len: usize, fd: FileDescriptor) -> isize,
-    pub r_sync: extern "C" fn(desc: isize) -> isize,
-    pub r_unmap: extern "C" fn(desc: isize) -> isize,
     /// Device Control
     ///
     /// Each type of device will have a different set of available commands and argument values.

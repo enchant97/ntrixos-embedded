@@ -2,8 +2,9 @@ use core::sync::atomic::Ordering;
 
 use num_enum::TryFromPrimitive;
 use sdk::{
+    FileDescriptor,
     errno::ErrNo,
-    syscall::{SyscallNum, syscall_message},
+    syscall::{RMapSyscall, RSyncSyscall, RUnmapSyscall, SyscallNum, syscall_message},
 };
 
 pub fn zero_syscall_data() {
@@ -23,4 +24,33 @@ pub fn unpack_num() -> Result<SyscallNum, usize> {
 pub fn unpack_exit_args() -> ErrNo {
     let arg0 = syscall_message().args[0].load(Ordering::Relaxed);
     arg0 as isize
+}
+
+pub fn unpack_r_map() -> RMapSyscall {
+    let msg = syscall_message();
+    RMapSyscall {
+        addr: msg.args[0].load(Ordering::Relaxed) as *mut u8,
+        len: msg.args[1].load(Ordering::Relaxed),
+        fd: FileDescriptor::try_from_primitive(msg.args[2].load(Ordering::Relaxed)).unwrap(),
+    }
+}
+
+pub fn unpack_r_sync() -> RSyncSyscall {
+    let msg = syscall_message();
+    RSyncSyscall {
+        desc: msg.args[0].load(Ordering::Relaxed) as isize,
+    }
+}
+
+pub fn unpack_r_unmap() -> RUnmapSyscall {
+    let msg = syscall_message();
+    RUnmapSyscall {
+        desc: msg.args[0].load(Ordering::Relaxed) as isize,
+    }
+}
+
+pub fn pack_response(num: SyscallNum, result: isize) {
+    let msg = syscall_message();
+    msg.result.store(result, Ordering::Relaxed);
+    msg.num.store(num as usize, Ordering::Release);
 }

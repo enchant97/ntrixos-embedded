@@ -149,9 +149,6 @@ pub static KERNEL_ABI: KernelAbi = KernelAbi {
     read: abi_read,
     flush: abi_flush,
     seek: abi_seek,
-    r_map: abi_r_map,
-    r_sync: abi_r_sync,
-    r_unmap: abi_r_unmap,
     ioctl: abi_ioctl,
 };
 
@@ -198,8 +195,69 @@ bind_interrupts!(struct Irqs{
     USBCTRL_IRQ => embassy_rp::usb::host::InterruptHandler<USB>;
 });
 
-fn syscall_exit(code: ErrNo) {
+fn syscall_exit() {
+    // TODO use exit code
+    let code = syscall::unpack_exit_args();
     k_signal_user_restart();
+}
+
+fn syscall_r_map() {
+    let req = syscall::unpack_r_map();
+    let result = match req.fd {
+        FileDescriptor::DisplayChar => RD_TABLE.lock(|rd_table| {
+            let mut rd_table = rd_table.borrow_mut();
+            let raw_ptr = if let Some(addr) = NonNull::new(req.addr) {
+                RawPtr(addr)
+            } else {
+                return -1;
+            };
+            let ref_desc = rd_table
+                .try_insert(RdTableEntry {
+                    raw_ptr,
+                    len: req.len,
+                    fd: req.fd,
+                })
+                .unwrap();
+            ref_desc as isize
+        }),
+        _ => -1,
+    };
+    syscall::pack_response(SyscallNum::RMap, result);
+    kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
+}
+
+fn syscall_r_unmap() {
+    let req = syscall::unpack_r_unmap();
+    let result = RD_TABLE.lock(|rd_table| {
+        let mut rd_table = rd_table.borrow_mut();
+        rd_table
+            .try_remove(req.desc as usize)
+            .map(|_| 0)
+            .unwrap_or(-1)
+    });
+    syscall::pack_response(SyscallNum::RUnmap, result);
+    kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
+}
+
+fn syscall_r_sync() {
+    let req = syscall::unpack_r_sync();
+    let result = RD_TABLE.lock(|rd_table| {
+        let rd_table = rd_table.borrow_mut();
+        let rd_ref = *rd_table.get(req.desc as usize).unwrap();
+        match rd_ref.fd {
+            FileDescriptor::DisplayChar => {
+                FLUSH_CHAR_DISPLAY_SIG.signal(rd_ref);
+                while !FLUSH_CHAR_DISPLAY_DONE_SIG.signaled() {
+                    cortex_m::asm::nop();
+                }
+                FLUSH_CHAR_DISPLAY_DONE_SIG.reset();
+                0
+            }
+            _ => -1,
+        }
+    });
+    syscall::pack_response(SyscallNum::RSync, result);
+    kcom::write_kcom_fifo_blocking(kcom::KComType::Syscall);
 }
 
 extern "C" fn abi_write(fd: FileDescriptor, buff: *const u8, buff_len: usize) {
@@ -238,49 +296,6 @@ extern "C" fn abi_flush(fd: FileDescriptor) {}
 
 extern "C" fn abi_seek(fd: FileDescriptor, offset: usize) {
     todo!()
-}
-
-extern "C" fn abi_r_map(addr: *mut u8, len: usize, fd: FileDescriptor) -> isize {
-    match fd {
-        FileDescriptor::DisplayChar => RD_TABLE.lock(|rd_table| {
-            let mut rd_table = rd_table.borrow_mut();
-            let raw_ptr = if let Some(addr) = NonNull::new(addr) {
-                RawPtr(addr)
-            } else {
-                return -1;
-            };
-            let ref_desc = rd_table
-                .try_insert(RdTableEntry { raw_ptr, len, fd })
-                .unwrap();
-            ref_desc as isize
-        }),
-        _ => -1,
-    }
-}
-
-extern "C" fn abi_r_sync(desc: isize) -> isize {
-    RD_TABLE.lock(|rd_table| {
-        let rd_table = rd_table.borrow_mut();
-        let rd_ref = *rd_table.get(desc as usize).unwrap();
-        match rd_ref.fd {
-            FileDescriptor::DisplayChar => {
-                FLUSH_CHAR_DISPLAY_SIG.signal(rd_ref);
-                while !FLUSH_CHAR_DISPLAY_DONE_SIG.signaled() {
-                    cortex_m::asm::nop();
-                }
-                FLUSH_CHAR_DISPLAY_DONE_SIG.reset();
-                0
-            }
-            _ => -1,
-        }
-    })
-}
-
-extern "C" fn abi_r_unmap(desc: isize) -> isize {
-    RD_TABLE.lock(|rd_table| {
-        let mut rd_table = rd_table.borrow_mut();
-        rd_table.try_remove(desc as usize).map(|_| 0).unwrap_or(-1)
-    })
 }
 
 extern "C" fn abi_ioctl(
@@ -361,10 +376,10 @@ pub async fn kernel_entry(r: DisplayResources) -> ! {
                 SyscallNum::Null => {
                     defmt::debug!("got syscall NULL, ignoring");
                 }
-                SyscallNum::Exit => {
-                    let code = syscall::unpack_exit_args();
-                    syscall_exit(code);
-                }
+                SyscallNum::Exit => syscall_exit(),
+                SyscallNum::RMap => syscall_r_map(),
+                SyscallNum::RUnmap => syscall_r_unmap(),
+                SyscallNum::RSync => syscall_r_sync(),
                 _ => todo!(),
             }
         }

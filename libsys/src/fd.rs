@@ -3,9 +3,13 @@ use core::{ffi::c_void, ptr::NonNull};
 use sdk::{
     FileDescriptor,
     errno::{self, KernelResult},
+    syscall::{RMapSyscall, RSyncSyscall, RUnmapSyscall},
 };
 
-use crate::core::abi;
+use crate::{
+    core::abi,
+    syscall::{req_r_map, req_r_sync, req_r_unmap},
+};
 
 pub type RefDesc = isize;
 
@@ -51,17 +55,21 @@ impl FileDesc {
     }
 
     pub fn r_map(&mut self, addr: NonNull<u8>, len: usize) -> KernelResult<RefDesc> {
-        let desc = (abi().r_map)(addr.as_ptr(), len, self.descriptor);
+        let desc = req_r_map(RMapSyscall {
+            addr: addr.as_ptr(),
+            len,
+            fd: self.descriptor,
+        });
         if desc >= 0 { Ok(desc) } else { Err(desc) }
     }
 
     pub fn r_sync(&mut self, ref_desc: RefDesc) -> KernelResult<()> {
-        let code = (abi().r_sync)(ref_desc);
+        let code = req_r_sync(RSyncSyscall { desc: ref_desc });
         if code >= 0 { Ok(()) } else { Err(code) }
     }
 
     pub fn r_unmap(&mut self, ref_desc: RefDesc) -> KernelResult<()> {
-        let code = (abi().r_unmap)(ref_desc);
+        let code = req_r_unmap(RUnmapSyscall { desc: ref_desc });
         if code >= 0 { Ok(()) } else { Err(code) }
     }
 
