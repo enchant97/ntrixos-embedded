@@ -84,7 +84,6 @@ pub fn entrypoint(args: TokenStream, item: TokenStream) -> TokenStream {
             unsafe {
                 ::libsys::mem::init_memory();
             }
-            ::libsys::core::sys_init(abi);
             #user_fn_ident();
             ::libsys::sdk::errno::OK
         }

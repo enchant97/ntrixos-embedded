@@ -1,7 +1,6 @@
 #![no_std]
 
 pub mod char_display;
-pub mod core;
 pub mod display;
 pub mod fd;
 pub mod keyboard;
